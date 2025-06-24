@@ -1,8 +1,10 @@
 import { LMStudioClient } from './LMStudioClient.js';
+import { OpenAIClient } from './OpenAIClient.js';
+import { DeepSeekClient } from './DeepSeekClient.js';
 
 /**
  * MCP Agent Manager - Handles Model Context Protocol agents and communication
- * Implements the Strategy pattern for different agent types and LM Studio integration
+ * Implements the Strategy pattern for different agent types with LM Studio and OpenAI integration
  */
 export class MCPAgentManager {
     constructor(eventBus) {
@@ -11,18 +13,43 @@ export class MCPAgentManager {
         this.activeAgent = null;
         this.requestQueue = [];
         this.isProcessing = false;
+        
+        // Multiple AI providers
         this.lmStudioClient = null;
+        this.openaiClient = null;
+        this.deepseekClient = null;
         this.availableModels = [];
         this.streamingEnabled = true;
         this.conversationHistory = new Map(); // Chat ID -> messages array
+        
+        // Provider status
+        this.providerStatus = {
+            lmstudio: { connected: false, models: [] },
+            openai: { connected: false, models: [] },
+            deepseek: { connected: false, models: [] }
+        };
     }
 
     async initialize() {
         this.setupEventListeners();
-        await this.initializeLMStudio();
+        await this.initializeProviders();
         await this.loadAgents();
         
         console.log('🤖 MCP Agent Manager initialized');
+    }
+
+    /**
+     * Initialize all AI providers (LM Studio, OpenAI, and DeepSeek)
+     */
+    async initializeProviders() {
+        await Promise.all([
+            this.initializeLMStudio(),
+            this.initializeOpenAI(),
+            this.initializeDeepSeek()
+        ]);
+        
+        // Combine models from all providers
+        this.updateAvailableModels();
     }
 
     /**
@@ -41,24 +68,129 @@ export class MCPAgentManager {
                 console.log('✅ Connected to LM Studio');
                 
                 // Load available models
-                this.availableModels = await this.lmStudioClient.getModels();
-                console.log(`📋 Loaded ${this.availableModels.length} models from LM Studio`);
+                const lmStudioModels = await this.lmStudioClient.getModels();
+                this.providerStatus.lmstudio = {
+                    connected: true,
+                    models: lmStudioModels
+                };
+                
+                console.log(`📋 Loaded ${lmStudioModels.length} models from LM Studio`);
                 
                 this.eventBus.emit('agent:lmstudio:connected', {
-                    models: this.availableModels
+                    models: lmStudioModels
                 });
             } else {
                 console.warn('⚠️ LM Studio not available:', connectionTest.error);
+                this.providerStatus.lmstudio = { connected: false, models: [] };
                 this.eventBus.emit('agent:lmstudio:disconnected', connectionTest);
             }
         } catch (error) {
             console.error('Failed to initialize LM Studio:', error);
+            this.providerStatus.lmstudio = { connected: false, models: [] };
             this.eventBus.emit('ui:notification', {
                 message: 'LM Studio connection failed. Please ensure LM Studio is running with a loaded model.',
-                type: 'error',
-                duration: 5000
+                type: 'warning',
+                duration: 3000
             });
         }
+    }
+
+    /**
+     * Initialize OpenAI client
+     */
+    async initializeOpenAI() {
+        try {
+            // Load OpenAI configuration from storage
+            const settings = JSON.parse(localStorage.getItem('mcp-tabajara-settings') || '{}');
+            const openaiConfig = settings.openai || {};
+
+            this.openaiClient = new OpenAIClient({
+                apiKey: openaiConfig.apiKey || '',
+                defaultModel: openaiConfig.defaultModel || 'gpt-4o-mini',
+                organization: openaiConfig.organization || null
+            });
+
+            // Test connection if API key is available
+            const connectionTest = await this.openaiClient.testConnection();
+            if (connectionTest.connected) {
+                console.log('✅ Connected to OpenAI');
+                
+                // Load available models
+                const openaiModels = await this.openaiClient.getModels();
+                this.providerStatus.openai = {
+                    connected: true,
+                    models: openaiModels
+                };
+                
+                console.log(`📋 Loaded ${openaiModels.length} models from OpenAI`);
+                
+                this.eventBus.emit('agent:openai:connected', {
+                    models: openaiModels
+                });
+            } else {
+                console.log('ℹ️ OpenAI not configured or unavailable:', connectionTest.error);
+                this.providerStatus.openai = { connected: false, models: [] };
+                this.eventBus.emit('agent:openai:disconnected', connectionTest);
+            }
+        } catch (error) {
+            console.error('Failed to initialize OpenAI:', error);
+            this.providerStatus.openai = { connected: false, models: [] };
+        }
+    }
+
+    /**
+     * Initialize DeepSeek client
+     */
+    async initializeDeepSeek() {
+        try {
+            // Load DeepSeek configuration from storage
+            const settings = JSON.parse(localStorage.getItem('mcp-tabajara-settings') || '{}');
+            const deepseekConfig = settings.deepseek || {};
+
+            this.deepseekClient = new DeepSeekClient({
+                apiKey: deepseekConfig.apiKey || '',
+                defaultModel: deepseekConfig.defaultModel || 'deepseek-chat'
+            });
+
+            // Test connection if API key is available
+            const connectionTest = await this.deepseekClient.testConnection();
+            if (connectionTest.connected) {
+                console.log('✅ Connected to DeepSeek');
+                
+                // Load available models
+                const deepseekModels = await this.deepseekClient.getModels();
+                this.providerStatus.deepseek = {
+                    connected: true,
+                    models: deepseekModels
+                };
+                
+                console.log(`📋 Loaded ${deepseekModels.length} models from DeepSeek`);
+                
+                this.eventBus.emit('agent:deepseek:connected', {
+                    models: deepseekModels
+                });
+            } else {
+                console.log('ℹ️ DeepSeek not configured or unavailable:', connectionTest.error);
+                this.providerStatus.deepseek = { connected: false, models: [] };
+                this.eventBus.emit('agent:deepseek:disconnected', connectionTest);
+            }
+        } catch (error) {
+            console.error('Failed to initialize DeepSeek:', error);
+            this.providerStatus.deepseek = { connected: false, models: [] };
+        }
+    }
+
+    /**
+     * Update available models from all providers
+     */
+    updateAvailableModels() {
+        this.availableModels = [
+            ...this.providerStatus.lmstudio.models.map(model => ({ ...model, provider: 'lmstudio' })),
+            ...this.providerStatus.openai.models.map(model => ({ ...model, provider: 'openai' })),
+            ...this.providerStatus.deepseek.models.map(model => ({ ...model, provider: 'deepseek' }))
+        ];
+        
+        console.log(`📊 Total available models: ${this.availableModels.length} (LM Studio: ${this.providerStatus.lmstudio.models.length}, OpenAI: ${this.providerStatus.openai.models.length}, DeepSeek: ${this.providerStatus.deepseek.models.length})`);
     }
 
     /**
@@ -86,7 +218,30 @@ export class MCPAgentManager {
         });
 
         this.eventBus.on('agent:reconnect', async () => {
+            await this.initializeProviders();
+        });
+
+        this.eventBus.on('agent:reconnect:lmstudio', async () => {
             await this.initializeLMStudio();
+            this.updateAvailableModels();
+        });
+
+        this.eventBus.on('agent:reconnect:openai', async () => {
+            await this.initializeOpenAI();
+            this.updateAvailableModels();
+        });
+
+        this.eventBus.on('agent:configure:openai', async (config) => {
+            await this.configureOpenAI(config);
+        });
+
+        this.eventBus.on('agent:reconnect:deepseek', async () => {
+            await this.initializeDeepSeek();
+            this.updateAvailableModels();
+        });
+
+        this.eventBus.on('agent:configure:deepseek', async (config) => {
+            await this.configureDeepSeek(config);
         });
 
         this.eventBus.on('agent:toggle-streaming', (enabled) => {
@@ -149,89 +304,230 @@ export class MCPAgentManager {
      * Load available agents
      */
     async loadAgents() {
-        // Get the primary model from LM Studio
-        const primaryModel = this.availableModels.length > 0 
-            ? this.availableModels[0].id 
-            : 'google/gemma-3-4b';
+        // Get primary models from each provider
+        const lmStudioModels = this.providerStatus.lmstudio.models;
+        const openaiModels = this.providerStatus.openai.models;
+        const deepseekModels = this.providerStatus.deepseek.models;
+        
+        const primaryLMModel = lmStudioModels.length > 0 ? lmStudioModels[0].id : 'google/gemma-3-4b';
+        const primaryOpenAIModel = openaiModels.length > 0 ? openaiModels[0].id : 'gpt-4o-mini';
+        const primaryDeepSeekModel = deepseekModels.length > 0 ? deepseekModels[0].id : 'deepseek-chat';
 
-        // Default built-in agents with LM Studio integration
-        const defaultAgents = [
-            {
-                id: 'lm-general',
-                name: 'General Assistant',
-                type: 'lm-studio',
-                description: 'General purpose AI assistant powered by LM Studio',
-                capabilities: ['chat', 'code', 'analysis', 'creative'],
-                config: {
-                    model: primaryModel,
-                    temperature: 0.7,
-                    maxTokens: -1,
-                    systemPrompt: 'You are a helpful AI assistant. Provide clear, accurate, and helpful responses.'
-                },
-                status: 'active'
-            },
-            {
-                id: 'lm-code',
-                name: 'Code Assistant',
-                type: 'lm-studio',
-                description: 'Specialized coding assistant with expertise in multiple programming languages',
-                capabilities: ['code', 'debug', 'review', 'documentation'],
-                config: {
-                    model: primaryModel,
-                    temperature: 0.3,
-                    maxTokens: -1,
-                    systemPrompt: 'You are an expert programming assistant. Help with coding tasks, debugging, code review, and technical documentation. Provide clear explanations and well-commented code examples.'
-                },
-                status: 'active'
-            },
-            {
-                id: 'lm-research',
-                name: 'Research Assistant',
-                type: 'lm-studio',
-                description: 'Research and analysis specialist',
-                capabilities: ['research', 'analysis', 'summarization', 'fact-checking'],
-                config: {
-                    model: primaryModel,
-                    temperature: 0.4,
-                    maxTokens: -1,
-                    systemPrompt: 'You are a research assistant specialized in analysis, summarization, and information synthesis. Provide well-structured, evidence-based responses with clear reasoning.'
-                },
-                status: 'active'
-            },
-            {
-                id: 'lm-creative',
-                name: 'Creative Assistant',
-                type: 'lm-studio',
-                description: 'Creative writing and content generation specialist',
-                capabilities: ['creative-writing', 'storytelling', 'brainstorming', 'content'],
-                config: {
-                    model: primaryModel,
-                    temperature: 0.8,
-                    maxTokens: -1,
-                    systemPrompt: 'You are a creative writing assistant. Help with storytelling, creative content generation, brainstorming ideas, and artistic expression. Be imaginative and inspiring.'
-                },
-                status: 'active'
-            }
-        ];
+        // Default built-in agents with multi-provider support
+        const defaultAgents = [];
 
-        // Add agents for each available model
-        this.availableModels.forEach((model, index) => {
-            if (index > 0) { // Skip first model as it's already used above
-                defaultAgents.push({
-                    id: `lm-model-${index}`,
-                    name: `${model.id.split('/').pop()} Model`,
+        // Add LM Studio agents if available
+        if (this.providerStatus.lmstudio.connected) {
+            defaultAgents.push(
+                {
+                    id: 'lm-general',
+                    name: 'General Assistant (LM Studio)',
                     type: 'lm-studio',
-                    description: `Direct access to ${model.id} model`,
-                    capabilities: ['chat', 'general'],
+                    description: 'General purpose AI assistant powered by LM Studio',
+                    capabilities: ['chat', 'code', 'analysis', 'creative'],
                     config: {
-                        model: model.id,
+                        model: primaryLMModel,
                         temperature: 0.7,
                         maxTokens: -1,
-                        systemPrompt: 'You are a helpful AI assistant.'
+                        systemPrompt: 'You are a helpful AI assistant. Provide clear, accurate, and helpful responses.'
                     },
                     status: 'active'
-                });
+                },
+                {
+                    id: 'lm-code',
+                    name: 'Code Assistant (LM Studio)',
+                    type: 'lm-studio',
+                    description: 'Specialized coding assistant with expertise in multiple programming languages',
+                    capabilities: ['code', 'debug', 'review', 'documentation'],
+                    config: {
+                        model: primaryLMModel,
+                        temperature: 0.3,
+                        maxTokens: -1,
+                        systemPrompt: 'You are an expert programming assistant. Help with coding tasks, debugging, code review, and technical documentation. Provide clear explanations and well-commented code examples.'
+                    },
+                    status: 'active'
+                },
+                {
+                    id: 'lm-research',
+                    name: 'Research Assistant (LM Studio)',
+                    type: 'lm-studio',
+                    description: 'Research and analysis specialist',
+                    capabilities: ['research', 'analysis', 'summarization', 'fact-checking'],
+                    config: {
+                        model: primaryLMModel,
+                        temperature: 0.4,
+                        maxTokens: -1,
+                        systemPrompt: 'You are a research assistant specialized in analysis, summarization, and information synthesis. Provide well-structured, evidence-based responses with clear reasoning.'
+                    },
+                    status: 'active'
+                },
+                {
+                    id: 'lm-creative',
+                    name: 'Creative Assistant (LM Studio)',
+                    type: 'lm-studio',
+                    description: 'Creative writing and content generation specialist',
+                    capabilities: ['creative-writing', 'storytelling', 'brainstorming', 'content'],
+                    config: {
+                        model: primaryLMModel,
+                        temperature: 0.8,
+                        maxTokens: -1,
+                        systemPrompt: 'You are a creative writing assistant. Help with storytelling, creative content generation, brainstorming ideas, and artistic expression. Be imaginative and inspiring.'
+                    },
+                    status: 'active'
+                }
+            );
+        }
+
+        // Add OpenAI agents if available
+        if (this.providerStatus.openai.connected) {
+            defaultAgents.push(
+                {
+                    id: 'openai-general',
+                    name: 'General Assistant (OpenAI)',
+                    type: 'openai',
+                    description: 'General purpose AI assistant powered by OpenAI GPT models',
+                    capabilities: ['chat', 'code', 'analysis', 'creative', 'reasoning'],
+                    config: {
+                        model: primaryOpenAIModel,
+                        temperature: 0.7,
+                        maxTokens: 4096,
+                        systemPrompt: 'You are a helpful AI assistant. Provide clear, accurate, and helpful responses.'
+                    },
+                    status: 'active'
+                },
+                {
+                    id: 'openai-code',
+                    name: 'Code Assistant (OpenAI)',
+                    type: 'openai',
+                    description: 'Advanced coding assistant with GPT-4 level programming expertise',
+                    capabilities: ['code', 'debug', 'review', 'documentation', 'architecture'],
+                    config: {
+                        model: primaryOpenAIModel,
+                        temperature: 0.2,
+                        maxTokens: 4096,
+                        systemPrompt: 'You are an expert programming assistant with deep knowledge of software development, algorithms, and best practices. Help with coding tasks, debugging, code review, and technical documentation. Provide clear explanations and well-commented code examples.'
+                    },
+                    status: 'active'
+                },
+                {
+                    id: 'openai-research',
+                    name: 'Research Assistant (OpenAI)',
+                    type: 'openai',
+                    description: 'Advanced research and analysis specialist with GPT reasoning capabilities',
+                    capabilities: ['research', 'analysis', 'summarization', 'fact-checking', 'reasoning'],
+                    config: {
+                        model: primaryOpenAIModel,
+                        temperature: 0.3,
+                        maxTokens: 4096,
+                        systemPrompt: 'You are an advanced research assistant with strong analytical and reasoning capabilities. Provide well-structured, evidence-based responses with clear reasoning, critical analysis, and comprehensive summaries.'
+                    },
+                    status: 'active'
+                },
+                {
+                    id: 'openai-creative',
+                    name: 'Creative Assistant (OpenAI)',
+                    type: 'openai',
+                    description: 'Creative writing and content generation with advanced language capabilities',
+                    capabilities: ['creative-writing', 'storytelling', 'brainstorming', 'content', 'poetry'],
+                    config: {
+                        model: primaryOpenAIModel,
+                        temperature: 0.9,
+                        maxTokens: 4096,
+                        systemPrompt: 'You are a creative writing assistant with exceptional language skills and imagination. Help with storytelling, creative content generation, brainstorming ideas, poetry, and artistic expression. Be imaginative, inspiring, and linguistically sophisticated.'
+                    },
+                    status: 'active'
+                }
+            );
+        }
+
+        // Add DeepSeek agents if available
+        if (this.providerStatus.deepseek.connected) {
+            defaultAgents.push(
+                {
+                    id: 'deepseek-general',
+                    name: 'General Assistant (DeepSeek)',
+                    type: 'deepseek',
+                    description: 'General purpose AI assistant powered by DeepSeek models',
+                    capabilities: ['chat', 'code', 'analysis', 'reasoning', 'creative'],
+                    config: {
+                        model: primaryDeepSeekModel,
+                        temperature: 0.7,
+                        maxTokens: 4096,
+                        systemPrompt: 'You are a helpful AI assistant with strong reasoning capabilities. Provide clear, accurate, and helpful responses.'
+                    },
+                    status: 'active'
+                },
+                {
+                    id: 'deepseek-code',
+                    name: 'Code Assistant (DeepSeek)',
+                    type: 'deepseek',
+                    description: 'Advanced coding assistant with deep reasoning capabilities',
+                    capabilities: ['code', 'debug', 'review', 'documentation', 'architecture'],
+                    config: {
+                        model: primaryDeepSeekModel,
+                        temperature: 0.2,
+                        maxTokens: 4096,
+                        systemPrompt: 'You are an expert programming assistant with advanced reasoning and deep technical knowledge. Help with coding tasks, debugging, code review, and technical documentation. Provide clear explanations and well-commented code examples.'
+                    },
+                    status: 'active'
+                },
+                {
+                    id: 'deepseek-research',
+                    name: 'Research Assistant (DeepSeek)',
+                    type: 'deepseek',
+                    description: 'Advanced research and analysis specialist with deep reasoning',
+                    capabilities: ['research', 'analysis', 'summarization', 'fact-checking', 'reasoning'],
+                    config: {
+                        model: primaryDeepSeekModel,
+                        temperature: 0.3,
+                        maxTokens: 4096,
+                        systemPrompt: 'You are an advanced research assistant with exceptional reasoning and analytical capabilities. Provide well-structured, evidence-based responses with clear reasoning, critical analysis, and comprehensive summaries.'
+                    },
+                    status: 'active'
+                },
+                {
+                    id: 'deepseek-reasoning',
+                    name: 'Reasoning Specialist (DeepSeek)',
+                    type: 'deepseek',
+                    description: 'Specialized agent for complex reasoning and problem-solving tasks',
+                    capabilities: ['reasoning', 'problem-solving', 'analysis', 'logic', 'mathematics'],
+                    config: {
+                        model: 'deepseek-reasoner',
+                        temperature: 0.1,
+                        maxTokens: 8192,
+                        systemPrompt: 'You are a reasoning specialist with exceptional analytical and problem-solving capabilities. Focus on step-by-step logical analysis, mathematical reasoning, and complex problem decomposition. Show your thinking process clearly.'
+                    },
+                    status: 'active'
+                }
+            );
+        }
+
+        // Add individual model agents for variety
+        this.availableModels.forEach((model, index) => {
+            const modelName = model.id.split('/').pop() || model.id;
+            const provider = model.provider || 'unknown';
+            
+            // Skip if this model is already used as a primary model
+            if ((provider === 'lmstudio' && model.id === primaryLMModel) || 
+                (provider === 'openai' && model.id === primaryOpenAIModel) ||
+                (provider === 'deepseek' && model.id === primaryDeepSeekModel)) {
+                return;
             }
+            
+            defaultAgents.push({
+                id: `${provider}-model-${index}`,
+                name: `${modelName} (${provider.toUpperCase()})`,
+                type: provider,
+                description: `Direct access to ${model.id} model via ${provider}`,
+                capabilities: ['chat', 'general'],
+                config: {
+                    model: model.id,
+                    temperature: 0.7,
+                    maxTokens: (provider === 'openai' || provider === 'deepseek') ? 4096 : -1,
+                    systemPrompt: 'You are a helpful AI assistant.'
+                },
+                status: 'active'
+            });
         });
 
         // Load agents into map
@@ -242,8 +538,8 @@ export class MCPAgentManager {
         // Load custom agents from storage
         await this.loadCustomAgentsFromStorage();
 
-        // Select default agent
-        this.activeAgent = this.agents.get('lm-general');
+        // Select default agent (prefer DeepSeek if available, then OpenAI, otherwise LM Studio)
+        this.activeAgent = this.agents.get('deepseek-general') || this.agents.get('openai-general') || this.agents.get('lm-general') || Array.from(this.agents.values())[0];
         
         this.eventBus.emit('agents:loaded', Array.from(this.agents.values()));
     }
@@ -336,11 +632,28 @@ export class MCPAgentManager {
      */
     async executeRequest(request) {
         try {
-            if (!this.lmStudioClient) {
-                throw new Error('LM Studio is not connected. Please ensure LM Studio is running and connected.');
+            const agentType = request.agent.type;
+            let response, wasStreaming;
+
+            // Route to appropriate provider based on agent type
+            if (agentType === 'lm-studio') {
+                if (!this.lmStudioClient) {
+                    throw new Error('LM Studio is not connected. Please ensure LM Studio is running and connected.');
+                }
+                ({ response, wasStreaming } = await this.processWithLMStudio(request));
+            } else if (agentType === 'openai') {
+                if (!this.openaiClient) {
+                    throw new Error('OpenAI is not configured. Please add your API key in settings.');
+                }
+                ({ response, wasStreaming } = await this.processWithOpenAI(request));
+            } else if (agentType === 'deepseek') {
+                if (!this.deepseekClient) {
+                    throw new Error('DeepSeek is not configured. Please add your API key in settings.');
+                }
+                ({ response, wasStreaming } = await this.processWithDeepSeek(request));
+            } else {
+                throw new Error(`Unknown agent type: ${agentType}`);
             }
-            
-            const { response, wasStreaming } = await this.processWithLMStudio(request);
             
             // Only emit regular message event if NOT streaming (to avoid duplicates)
             // Streaming messages are handled by the chat:message:streaming event
@@ -353,7 +666,8 @@ export class MCPAgentManager {
                     timestamp: new Date().toISOString(),
                     metadata: {
                         agent: request.agent.id,
-                        model: request.agent.config.model
+                        model: request.agent.config.model,
+                        provider: agentType
                     }
                 });
             }
@@ -461,7 +775,233 @@ export class MCPAgentManager {
         }
     }
 
+    /**
+     * Process request using OpenAI
+     */
+    async processWithOpenAI(request) {
+        try {
+            // Get or create conversation history for this chat
+            if (!this.conversationHistory.has(request.chatId)) {
+                this.conversationHistory.set(request.chatId, []);
+            }
+            
+            const history = this.conversationHistory.get(request.chatId);
+            
+            // Build messages array for API
+            const messages = [];
+            
+            // Add system message if available
+            if (request.agent.config.systemPrompt) {
+                messages.push(this.openaiClient.createSystemMessage(request.agent.config.systemPrompt));
+            }
+            
+            // Add conversation history (last 15 messages for OpenAI's larger context)
+            const recentHistory = history.slice(-15);
+            messages.push(...recentHistory);
+            
+            // Add current user message
+            const userMessage = this.openaiClient.createUserMessage(request.message.content);
+            messages.push(userMessage);
+            
+            // Prepare options
+            const options = {
+                model: request.agent.config.model,
+                temperature: request.agent.config.temperature,
+                maxTokens: request.agent.config.maxTokens,
+                topP: request.agent.config.topP,
+                frequencyPenalty: request.agent.config.frequencyPenalty,
+                presencePenalty: request.agent.config.presencePenalty
+            };
+            
+            let response;
+            
+            if (this.streamingEnabled) {
+                // Use streaming for better UX
+                let fullContent = '';
+                
+                response = await this.openaiClient.createStreamingChatCompletion(
+                    messages, 
+                    options,
+                    (chunk) => {
+                        fullContent = chunk.fullContent;
+                        
+                        // Update UI with streaming content
+                        this.eventBus.emit('chat:message:streaming', {
+                            chatId: request.chatId,
+                            content: fullContent,
+                            finished: chunk.finished
+                        });
+                    }
+                );
+                
+                response.content = fullContent;
+            } else {
+                // Use non-streaming
+                response = await this.openaiClient.createChatCompletion(messages, options);
+            }
+            
+            // Update conversation history
+            history.push(userMessage);
+            history.push(this.openaiClient.createAssistantMessage(response.content));
+            
+            // Keep history manageable (last 30 messages for OpenAI's larger context)
+            if (history.length > 30) {
+                history.splice(0, history.length - 30);
+            }
+            
+            // Log usage and cost information
+            if (response.usage) {
+                const cost = this.openaiClient.calculateCost(response.usage, options.model);
+                console.log(`💰 OpenAI Usage - Tokens: ${response.usage.total_tokens}, Cost: $${cost.toFixed(4)}`);
+            }
+            
+            return { 
+                response: response.content, 
+                wasStreaming: this.streamingEnabled,
+                usage: response.usage 
+            };
+            
+        } catch (error) {
+            console.error('OpenAI processing error:', error);
+            
+            // Show specific error messages for common OpenAI issues
+            if (error.message.includes('API key')) {
+                this.eventBus.emit('ui:notification', {
+                    message: 'OpenAI API key is invalid or missing. Please check your settings.',
+                    type: 'error',
+                    duration: 5000
+                });
+            } else if (error.message.includes('quota')) {
+                this.eventBus.emit('ui:notification', {
+                    message: 'OpenAI API quota exceeded. Please check your billing.',
+                    type: 'error',
+                    duration: 5000
+                });
+            } else if (error.message.includes('rate limit')) {
+                this.eventBus.emit('ui:notification', {
+                    message: 'OpenAI API rate limit exceeded. Please wait a moment.',
+                    type: 'warning',
+                    duration: 3000
+                });
+            }
+            
+            throw error;
+        }
+    }
 
+    /**
+     * Process request using DeepSeek
+     */
+    async processWithDeepSeek(request) {
+        try {
+            // Get or create conversation history for this chat
+            if (!this.conversationHistory.has(request.chatId)) {
+                this.conversationHistory.set(request.chatId, []);
+            }
+            
+            const history = this.conversationHistory.get(request.chatId);
+            
+            // Build messages array for API
+            const messages = [];
+            
+            // Add system message if available
+            if (request.agent.config.systemPrompt) {
+                messages.push(this.deepseekClient.createSystemMessage(request.agent.config.systemPrompt));
+            }
+            
+            // Add conversation history (last 15 messages for DeepSeek context)
+            const recentHistory = history.slice(-15);
+            messages.push(...recentHistory);
+            
+            // Add current user message
+            const userMessage = this.deepseekClient.createUserMessage(request.message.content);
+            messages.push(userMessage);
+            
+            // Prepare options
+            const options = {
+                model: request.agent.config.model,
+                temperature: request.agent.config.temperature,
+                maxTokens: request.agent.config.maxTokens,
+                topP: request.agent.config.topP,
+                frequencyPenalty: request.agent.config.frequencyPenalty,
+                presencePenalty: request.agent.config.presencePenalty
+            };
+            
+            let response;
+            
+            if (this.streamingEnabled) {
+                // Use streaming for better UX
+                let fullContent = '';
+                
+                response = await this.deepseekClient.createStreamingChatCompletion(
+                    messages, 
+                    options,
+                    (chunk) => {
+                        fullContent = chunk.fullContent;
+                        
+                        // Update UI with streaming content
+                        this.eventBus.emit('chat:message:streaming', {
+                            chatId: request.chatId,
+                            content: fullContent,
+                            finished: chunk.finished
+                        });
+                    }
+                );
+                
+                response.content = fullContent;
+            } else {
+                // Use non-streaming
+                response = await this.deepseekClient.createChatCompletion(messages, options);
+            }
+            
+            // Update conversation history
+            history.push(userMessage);
+            history.push(this.deepseekClient.createAssistantMessage(response.content));
+            
+            // Keep history manageable (last 30 messages for DeepSeek's context)
+            if (history.length > 30) {
+                history.splice(0, history.length - 30);
+            }
+            
+            // Log usage and cost information
+            if (response.usage) {
+                const cost = this.deepseekClient.calculateCost(response.usage, options.model);
+                console.log(`💰 DeepSeek Usage - Tokens: ${response.usage.total_tokens}, Cost: $${cost.toFixed(4)}`);
+            }
+            
+            return { 
+                response: response.content, 
+                wasStreaming: this.streamingEnabled,
+                usage: response.usage 
+            };
+            
+        } catch (error) {
+            console.error('DeepSeek processing error:', error);
+            
+            // Show specific error messages for common DeepSeek issues
+            if (error.message.includes('API key')) {
+                this.eventBus.emit('ui:notification', {
+                    message: 'DeepSeek API key is invalid or missing. Please check your settings.',
+                    type: 'error',
+                    duration: 5000
+                });
+            } else if (error.message.includes('quota')) {
+                this.eventBus.emit('ui:notification', {
+                    message: 'DeepSeek API quota exceeded. Please check your billing.',
+                    type: 'error',
+                    duration: 5000
+                });
+            } else if (error.message.includes('rate limit')) {
+                this.eventBus.emit('ui:notification', {
+                    message: 'DeepSeek API rate limit exceeded. Please wait a moment.',
+                    type: 'warning',
+                    duration: 3000
+                });
+            }
+            
+            throw error;
+        }
+    }
 
     /**
      * Select an agent as active
@@ -570,6 +1110,109 @@ export class MCPAgentManager {
         if (this.lmStudioClient) {
             this.lmStudioClient.updateConfig(config);
         }
+    }
+
+    /**
+     * Configure OpenAI settings
+     */
+    async configureOpenAI(config) {
+        try {
+            // Update OpenAI client configuration
+            if (this.openaiClient) {
+                this.openaiClient.updateConfig(config);
+            } else {
+                this.openaiClient = new OpenAIClient(config);
+            }
+
+            // Save configuration to storage
+            const settings = JSON.parse(localStorage.getItem('mcp-tabajara-settings') || '{}');
+            settings.openai = {
+                apiKey: config.apiKey || '',
+                defaultModel: config.defaultModel || 'gpt-4o-mini',
+                organization: config.organization || null
+            };
+            localStorage.setItem('mcp-tabajara-settings', JSON.stringify(settings));
+
+            // Test connection and reload models
+            await this.initializeOpenAI();
+            this.updateAvailableModels();
+            await this.loadAgents();
+
+            this.eventBus.emit('ui:notification', {
+                message: 'OpenAI configuration updated successfully',
+                type: 'success',
+                duration: 3000
+            });
+
+        } catch (error) {
+            console.error('Failed to configure OpenAI:', error);
+            this.eventBus.emit('ui:notification', {
+                message: `Failed to configure OpenAI: ${error.message}`,
+                type: 'error',
+                duration: 5000
+            });
+        }
+    }
+
+    /**
+     * Configure DeepSeek settings
+     */
+    async configureDeepSeek(config) {
+        try {
+            // Update DeepSeek client configuration
+            if (this.deepseekClient) {
+                this.deepseekClient.updateConfig(config);
+            } else {
+                this.deepseekClient = new DeepSeekClient(config);
+            }
+
+            // Save configuration to storage
+            const settings = JSON.parse(localStorage.getItem('mcp-tabajara-settings') || '{}');
+            settings.deepseek = {
+                apiKey: config.apiKey || '',
+                defaultModel: config.defaultModel || 'deepseek-chat'
+            };
+            localStorage.setItem('mcp-tabajara-settings', JSON.stringify(settings));
+
+            // Test connection and reload models
+            await this.initializeDeepSeek();
+            this.updateAvailableModels();
+            await this.loadAgents();
+
+            this.eventBus.emit('ui:notification', {
+                message: 'DeepSeek configuration updated successfully',
+                type: 'success',
+                duration: 3000
+            });
+
+        } catch (error) {
+            console.error('Failed to configure DeepSeek:', error);
+            this.eventBus.emit('ui:notification', {
+                message: `Failed to configure DeepSeek: ${error.message}`,
+                type: 'error',
+                duration: 5000
+            });
+        }
+    }
+
+    /**
+     * Get provider status
+     */
+    getProviderStatus() {
+        return {
+            lmstudio: {
+                ...this.providerStatus.lmstudio,
+                client: this.lmStudioClient ? this.lmStudioClient.getConfig() : null
+            },
+            openai: {
+                ...this.providerStatus.openai,
+                client: this.openaiClient ? this.openaiClient.getConfig() : null
+            },
+            deepseek: {
+                ...this.providerStatus.deepseek,
+                client: this.deepseekClient ? this.deepseekClient.getConfig() : null
+            }
+        };
     }
 
     /**

@@ -1,6 +1,6 @@
 // Main Application Entry Point
 import { ChatManager } from './modules/chat/ChatManager.js';
-import { UIManager } from './modules/ui/UIManager.js?v=21';
+import { UIManager } from './modules/ui/UIManager.js?v=22';
 import { StorageManager } from './modules/storage/StorageManager.js';
 import { MCPAgentManager } from './modules/agents/MCPAgentManager.js';
 import { FileManager } from './modules/files/FileManager.js';

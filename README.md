@@ -6,6 +6,9 @@ A sophisticated, modular HTML/JavaScript application that provides a ChatGPT-lik
 
 ### Core Functionality
 - **Modern Chat Interface**: ChatGPT-inspired UI with dark theme
+- **Multi-Provider AI Support**: 
+  - **LM Studio Integration**: Local AI models with complete privacy
+  - **OpenAI Integration**: GPT-4, GPT-3.5, and GPT-4o with cost tracking
 - **MCP Agent Integration**: Support for multiple AI agents with different capabilities
 - **Persistent Storage**: Uses IndexedDB with localStorage fallback
 - **File Management**: Drag & drop file uploads with File System Access API
@@ -62,14 +65,22 @@ js/
 ### Prerequisites
 - Modern web browser with ES6+ support
 - Local web server (for module imports)
-- **LM Studio** (for AI responses) - [Download here](https://lmstudio.ai/)
+- **AI Provider** (choose one or both):
+  - **LM Studio** (for local AI) - [Download here](https://lmstudio.ai/)
+  - **OpenAI API Key** (for cloud AI) - [Get here](https://platform.openai.com/api-keys)
 
 ### Installation
 
-1. **Install and Configure LM Studio**:
+1. **Configure AI Provider(s)**:
+   
+   **For LM Studio (Local AI)**:
    - Download and install LM Studio
    - Download a model (recommended: `google/gemma-3-4b` or similar)
    - Start the local server on port 1234 (Settings → Developer → Start Local Server)
+   
+   **For OpenAI (Cloud AI)**:
+   - Get an API key from [OpenAI Platform](https://platform.openai.com/api-keys)
+   - Configure it in the application settings (see [OpenAI Integration Guide](OPENAI_INTEGRATION.md))
 
 2. **Clone or download** the project files
 
@@ -90,16 +101,31 @@ js/
 ### Usage
 
 #### Basic Chat
-1. Ensure LM Studio is running with a loaded model
-2. Type your message in the input field
-3. Press Enter or click the send button
-4. The LM Studio agent will process and respond to your message in real-time
+1. Ensure at least one AI provider is configured (LM Studio running or OpenAI API key set)
+2. Select an agent from the dropdown (LM Studio or OpenAI agents)
+3. Type your message in the input field
+4. Press Enter or click the send button
+5. The selected agent will process and respond to your message in real-time
 
-#### LM Studio Integration
+#### AI Provider Integration
+
+**LM Studio (Local)**:
+- **Privacy**: Complete data privacy with local processing
+- **Cost**: Free after initial setup
+- **Requirements**: Requires powerful hardware and model downloads
 - **Connection Status**: Check the status indicator in the chat header
+
+**OpenAI (Cloud)**:
+- **Performance**: State-of-the-art GPT models with advanced capabilities
+- **Cost**: Pay-per-use with automatic cost tracking
+- **Requirements**: Internet connection and API key
+- **Models**: GPT-4o, GPT-4o Mini, GPT-4, GPT-3.5 Turbo
+
+**Common Features**:
 - **Model Selection**: Different agents use different models and system prompts
 - **Streaming Responses**: Real-time response generation for better UX
 - **Conversation Memory**: Each chat maintains context with the AI model
+- **Agent Management**: Switch between providers seamlessly
 
 #### File Operations
 - **Upload Files**: Drag & drop files or click the attachment button

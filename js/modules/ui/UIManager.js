@@ -2173,7 +2173,7 @@ export class UIManager {
                         </div>
                     </div>
                     
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <!-- LM Studio Settings -->
                         <div class="border border-chat-border rounded-lg p-4">
                             <h4 class="text-md font-medium mb-3 flex items-center">
@@ -2197,6 +2197,73 @@ export class UIManager {
                                 </label>
                                 <button onclick="window.mcpApp.uiManager.testLMStudioConnection()" 
                                         class="w-full px-3 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
+                                    <i class="fas fa-plug mr-1"></i> Test Connection
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- DeepSeek Settings -->
+                        <div class="border border-chat-border rounded-lg p-4">
+                            <h4 class="text-md font-medium mb-3 flex items-center">
+                                <i class="fas fa-brain mr-2"></i> DeepSeek Configuration
+                            </h4>
+                            <div class="space-y-3">
+                                <label class="block">
+                                    <span class="text-sm text-chat-secondary">API Key</span>
+                                    <input type="password" id="deepseek-api-key" value="${currentSettings.deepseek?.apiKey || ''}"
+                                           placeholder="sk-..."
+                                           class="w-full p-2 bg-chat-input rounded-lg border border-chat-border text-sm">
+                                    <div class="text-xs text-chat-secondary mt-1">
+                                        Get your API key from <a href="https://deepseek.com/" target="_blank" class="text-blue-400 hover:underline">DeepSeek Platform</a>
+                                    </div>
+                                </label>
+                                <label class="block">
+                                    <span class="text-sm text-chat-secondary">Default Model</span>
+                                    <select id="deepseek-default-model" class="w-full p-2 bg-chat-input rounded-lg border border-chat-border text-sm">
+                                        <option value="deepseek-chat" ${(currentSettings.deepseek?.defaultModel || 'deepseek-chat') === 'deepseek-chat' ? 'selected' : ''}>DeepSeek Chat (Recommended)</option>
+                                        <option value="deepseek-reasoner" ${currentSettings.deepseek?.defaultModel === 'deepseek-reasoner' ? 'selected' : ''}>DeepSeek Reasoner</option>
+                                    </select>
+                                </label>
+                                <button onclick="window.mcpApp.uiManager.testDeepSeekConnection()" 
+                                        class="w-full px-3 py-2 bg-purple-600 text-white rounded text-sm hover:bg-purple-700">
+                                    <i class="fas fa-plug mr-1"></i> Test Connection
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- OpenAI Settings -->
+                        <div class="border border-chat-border rounded-lg p-4">
+                            <h4 class="text-md font-medium mb-3 flex items-center">
+                                <i class="fab fa-openai mr-2"></i> OpenAI Configuration
+                            </h4>
+                            <div class="space-y-3">
+                                <label class="block">
+                                    <span class="text-sm text-chat-secondary">API Key</span>
+                                    <input type="password" id="openai-api-key" value="${currentSettings.openai?.apiKey || ''}" 
+                                           placeholder="sk-..."
+                                           class="w-full p-2 bg-chat-input rounded-lg border border-chat-border text-sm">
+                                    <div class="text-xs text-chat-secondary mt-1">
+                                        Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" class="text-blue-400 hover:underline">OpenAI Platform</a>
+                                    </div>
+                                </label>
+                                <label class="block">
+                                    <span class="text-sm text-chat-secondary">Default Model</span>
+                                    <select id="openai-default-model" class="w-full p-2 bg-chat-input rounded-lg border border-chat-border text-sm">
+                                        <option value="gpt-4o-mini" ${(currentSettings.openai?.defaultModel || 'gpt-4o-mini') === 'gpt-4o-mini' ? 'selected' : ''}>GPT-4o Mini (Recommended)</option>
+                                        <option value="gpt-4o" ${currentSettings.openai?.defaultModel === 'gpt-4o' ? 'selected' : ''}>GPT-4o</option>
+                                        <option value="gpt-4-turbo" ${currentSettings.openai?.defaultModel === 'gpt-4-turbo' ? 'selected' : ''}>GPT-4 Turbo</option>
+                                        <option value="gpt-4" ${currentSettings.openai?.defaultModel === 'gpt-4' ? 'selected' : ''}>GPT-4</option>
+                                        <option value="gpt-3.5-turbo" ${currentSettings.openai?.defaultModel === 'gpt-3.5-turbo' ? 'selected' : ''}>GPT-3.5 Turbo</option>
+                                    </select>
+                                </label>
+                                <label class="block">
+                                    <span class="text-sm text-chat-secondary">Organization ID (Optional)</span>
+                                    <input type="text" id="openai-organization" value="${currentSettings.openai?.organization || ''}" 
+                                           placeholder="org-..."
+                                           class="w-full p-2 bg-chat-input rounded-lg border border-chat-border text-sm">
+                                </label>
+                                <button onclick="window.mcpApp.uiManager.testOpenAIConnection()" 
+                                        class="w-full px-3 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700">
                                     <i class="fas fa-plug mr-1"></i> Test Connection
                                 </button>
                             </div>
@@ -2955,6 +3022,166 @@ export class UIManager {
     }
 
     /**
+     * Test OpenAI connection
+     */
+    async testOpenAIConnection() {
+        const apiKey = document.getElementById('openai-api-key')?.value;
+        
+        if (!apiKey) {
+            this.showNotification({
+                message: '❌ Please enter an OpenAI API key first',
+                type: 'error',
+                duration: 3000
+            });
+            return;
+        }
+
+        if (!apiKey.startsWith('sk-')) {
+            this.showNotification({
+                message: '❌ Invalid API key format. OpenAI keys start with "sk-"',
+                type: 'error',
+                duration: 3000
+            });
+            return;
+        }
+        
+        this.showNotification({
+            message: 'Testing OpenAI connection...',
+            type: 'info',
+            duration: 2000
+        });
+
+        try {
+            const response = await fetch('https://api.openai.com/v1/models', {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                signal: AbortSignal.timeout(10000)
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                const modelCount = data.data?.length || 0;
+                this.showNotification({
+                    message: `✅ OpenAI connection successful! Found ${modelCount} models.`,
+                    type: 'success',
+                    duration: 3000
+                });
+            } else if (response.status === 401) {
+                this.showNotification({
+                    message: '❌ Invalid API key. Please check your OpenAI API key.',
+                    type: 'error',
+                    duration: 5000
+                });
+            } else if (response.status === 429) {
+                this.showNotification({
+                    message: '❌ Rate limit exceeded. Please try again later.',
+                    type: 'error',
+                    duration: 5000
+                });
+            } else {
+                throw new Error(`HTTP ${response.status}`);
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                this.showNotification({
+                    message: '❌ Connection timeout. Please check your internet connection.',
+                    type: 'error',
+                    duration: 5000
+                });
+            } else {
+                this.showNotification({
+                    message: `❌ OpenAI connection failed: ${error.message}`,
+                    type: 'error',
+                    duration: 5000
+                });
+            }
+        }
+    }
+
+    /**
+     * Test DeepSeek connection
+     */
+    async testDeepSeekConnection() {
+        const apiKey = document.getElementById('deepseek-api-key')?.value;
+        
+        if (!apiKey) {
+            this.showNotification({
+                message: '❌ Please enter a DeepSeek API key first',
+                type: 'error',
+                duration: 3000
+            });
+            return;
+        }
+
+        if (apiKey.length < 10) {
+            this.showNotification({
+                message: '❌ Invalid API key format. Please check your DeepSeek API key.',
+                type: 'error',
+                duration: 3000
+            });
+            return;
+        }
+        
+        this.showNotification({
+            message: 'Testing DeepSeek connection...',
+            type: 'info',
+            duration: 2000
+        });
+
+        try {
+            const response = await fetch('https://api.deepseek.com/models', {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                signal: AbortSignal.timeout(10000)
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                const modelCount = data.data?.length || 0;
+                this.showNotification({
+                    message: `✅ DeepSeek connection successful! Found ${modelCount} models.`,
+                    type: 'success',
+                    duration: 3000
+                });
+            } else if (response.status === 401) {
+                this.showNotification({
+                    message: '❌ Invalid API key. Please check your DeepSeek API key.',
+                    type: 'error',
+                    duration: 5000
+                });
+            } else if (response.status === 429) {
+                this.showNotification({
+                    message: '❌ Rate limit exceeded. Please try again later.',
+                    type: 'error',
+                    duration: 5000
+                });
+            } else {
+                throw new Error(`HTTP ${response.status}`);
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                this.showNotification({
+                    message: '❌ Connection timeout. Please check your internet connection.',
+                    type: 'error',
+                    duration: 5000
+                });
+            } else {
+                this.showNotification({
+                    message: `❌ DeepSeek connection failed: ${error.message}`,
+                    type: 'error',
+                    duration: 5000
+                });
+            }
+        }
+    }
+
+    /**
      * Save settings
      */
     saveSettings() {
@@ -2963,6 +3190,15 @@ export class UIManager {
                 url: document.getElementById('lm-studio-url')?.value,
                 model: document.getElementById('lm-studio-model')?.value,
                 streaming: document.getElementById('streaming-enabled')?.checked
+            },
+            deepseek: {
+                apiKey: document.getElementById('deepseek-api-key')?.value,
+                defaultModel: document.getElementById('deepseek-default-model')?.value
+            },
+            openai: {
+                apiKey: document.getElementById('openai-api-key')?.value,
+                defaultModel: document.getElementById('openai-default-model')?.value,
+                organization: document.getElementById('openai-organization')?.value
             },
             app: {
                 theme: document.getElementById('app-theme')?.value,
@@ -3000,6 +3236,23 @@ export class UIManager {
             this.eventBus.emit('agent:toggle-streaming', settings.lmStudio.streaming);
         }
 
+        // Apply DeepSeek settings
+        if (settings.deepseek.apiKey) {
+            this.eventBus.emit('agent:configure:deepseek', {
+                apiKey: settings.deepseek.apiKey,
+                defaultModel: settings.deepseek.defaultModel
+            });
+        }
+
+        // Apply OpenAI settings
+        if (settings.openai.apiKey) {
+            this.eventBus.emit('agent:configure:openai', {
+                apiKey: settings.openai.apiKey,
+                defaultModel: settings.openai.defaultModel,
+                organization: settings.openai.organization
+            });
+        }
+
         // Apply app settings
         this.applyAppSettings(settings.app);
         this.applyVoiceSettings(settings.voice);
@@ -3034,6 +3287,15 @@ export class UIManager {
                 url: 'http://localhost:1234',
                 model: 'google/gemma-3-4b',
                 streaming: true
+            },
+            deepseek: {
+                apiKey: '',
+                defaultModel: 'deepseek-chat'
+            },
+            openai: {
+                apiKey: '',
+                defaultModel: 'gpt-4o-mini',
+                organization: ''
             },
             app: {
                 theme: 'dark',
