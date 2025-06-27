@@ -1,292 +1,109 @@
-# MCP Tabajara - Intelligent Assistant Application
+# MCP Tabajara - Intelligent Assistant
 
-A sophisticated, modular HTML/JavaScript application that provides a ChatGPT-like interface for interacting with MCP (Model Context Protocol) agents. Built with modern web technologies and following SOLID principles.
+A modern, multi-provider AI chat interface that supports OpenAI, Anthropic Claude, DeepSeek, and LM Studio with advanced features like file handling, voice input, and conversation management.
 
-## 🚀 Features
+## Features
 
-### Core Functionality
-- **Modern Chat Interface**: ChatGPT-inspired UI with dark theme
-- **Multi-Provider AI Support**: 
-  - **LM Studio Integration**: Local AI models with complete privacy
-  - **OpenAI Integration**: GPT-4, GPT-3.5, and GPT-4o with cost tracking
-- **MCP Agent Integration**: Support for multiple AI agents with different capabilities
-- **Persistent Storage**: Uses IndexedDB with localStorage fallback
-- **File Management**: Drag & drop file uploads with File System Access API
-- **Web Workers**: Parallel processing for agent requests
-- **Responsive Design**: Mobile-friendly layout
+- **Multi-Provider Support**: Connect to OpenAI, Anthropic Claude, DeepSeek, and LM Studio
+- **File Upload & Analysis**: Upload and analyze various file types
+- **Voice Input**: Speech-to-text functionality
+- **Conversation Mode**: Continuous conversation with context preservation
+- **Modern UI**: Clean, responsive interface with dark theme
+- **Code Highlighting**: Syntax highlighting for code blocks
+- **Chat History**: Persistent conversation history
+- **Settings Management**: Easy configuration and API key management
 
-### Advanced Capabilities
-- **Modular Architecture**: SOLID principles with dependency injection
-- **Event-Driven Communication**: Decoupled modules using EventBus
-- **Configuration Management**: Centralized settings with validation
-- **Error Handling**: Comprehensive error management with user feedback
-- **Performance Optimization**: Lazy loading and efficient resource management
+## Quick Start
 
-## 🏗️ Architecture
-
-### Module Structure
-```
-js/
-├── main.js                 # Application entry point
-└── modules/
-    ├── core/
-    │   ├── EventBus.js     # Event-driven communication
-    │   └── ConfigManager.js # Configuration management
-    ├── ui/
-    │   └── UIManager.js    # User interface management
-    ├── chat/
-    │   └── ChatManager.js  # Chat session management
-    ├── agents/
-    │   └── MCPAgentManager.js # MCP agent handling
-    ├── storage/
-    │   └── StorageManager.js # Data persistence
-    └── files/
-        └── FileManager.js  # File operations
-```
-
-### Design Patterns Used
-- **Repository Pattern**: Data access abstraction
-- **Observer Pattern**: Event-driven communication
-- **Strategy Pattern**: Multiple agent types
-- **Singleton Pattern**: Configuration management
-- **Command Pattern**: Message processing
-- **Factory Pattern**: Object creation
-
-## 🛠️ Technology Stack
-
-- **Frontend**: HTML5, CSS3 (Tailwind CSS), JavaScript (ES6+)
-- **Storage**: IndexedDB, localStorage (fallback)
-- **APIs**: File System Access API, Web Workers API
-- **Icons**: Font Awesome
-- **Architecture**: Modular ES6 modules
-
-## 🚦 Getting Started
-
-### Prerequisites
-- Modern web browser with ES6+ support
-- Local web server (for module imports)
-- **AI Provider** (choose one or both):
-  - **LM Studio** (for local AI) - [Download here](https://lmstudio.ai/)
-  - **OpenAI API Key** (for cloud AI) - [Get here](https://platform.openai.com/api-keys)
-
-### Installation
-
-1. **Configure AI Provider(s)**:
-   
-   **For LM Studio (Local AI)**:
-   - Download and install LM Studio
-   - Download a model (recommended: `google/gemma-3-4b` or similar)
-   - Start the local server on port 1234 (Settings → Developer → Start Local Server)
-   
-   **For OpenAI (Cloud AI)**:
-   - Get an API key from [OpenAI Platform](https://platform.openai.com/api-keys)
-   - Configure it in the application settings (see [OpenAI Integration Guide](OPENAI_INTEGRATION.md))
-
-2. **Clone or download** the project files
-
-3. **Start a local web server** in the project directory:
+1. **Clone the repository**
    ```bash
-   # Using Python
-   python -m http.server 8000
-   
-   # Using Node.js
-   npx http-server
-   
-   # Using PHP
-   php -S localhost:8000
+   git clone <repository-url>
+   cd mcp-tabajara
    ```
 
-4. **Open your browser** and navigate to `http://localhost:8000`
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
 
-### Usage
+3. **Configure API Keys**
+   - Open the application in your browser
+   - Click the settings icon (gear) in the sidebar
+   - Add your API keys for the providers you want to use
 
-#### Basic Chat
-1. Ensure at least one AI provider is configured (LM Studio running or OpenAI API key set)
-2. Select an agent from the dropdown (LM Studio or OpenAI agents)
-3. Type your message in the input field
-4. Press Enter or click the send button
-5. The selected agent will process and respond to your message in real-time
+4. **Start the development server**
+   ```bash
+   npm run dev
+   ```
+   This will start the Vite development server at `http://localhost:3000`
 
-#### AI Provider Integration
+5. **Build for production**
+   ```bash
+   npm run build
+   ```
+   This creates optimized files in the `dist/` folder
 
-**LM Studio (Local)**:
-- **Privacy**: Complete data privacy with local processing
-- **Cost**: Free after initial setup
-- **Requirements**: Requires powerful hardware and model downloads
-- **Connection Status**: Check the status indicator in the chat header
+6. **Start the proxy server (optional)**
+   ```bash
+   npm run proxy
+   ```
+   This starts the CORS proxy server for API requests
 
-**OpenAI (Cloud)**:
-- **Performance**: State-of-the-art GPT models with advanced capabilities
-- **Cost**: Pay-per-use with automatic cost tracking
-- **Requirements**: Internet connection and API key
-- **Models**: GPT-4o, GPT-4o Mini, GPT-4, GPT-3.5 Turbo
+## Development
 
-**Common Features**:
-- **Model Selection**: Different agents use different models and system prompts
-- **Streaming Responses**: Real-time response generation for better UX
-- **Conversation Memory**: Each chat maintains context with the AI model
-- **Agent Management**: Switch between providers seamlessly
+- **Development server**: `npm run dev` - Starts Vite dev server with hot reload
+- **Build**: `npm run build` - Creates production build
+- **Preview**: `npm run preview` - Preview production build locally
+- **Proxy server**: `npm run proxy` - Start CORS proxy server
+- **Proxy dev**: `npm run proxy:dev` - Start proxy server with auto-restart
 
-#### File Operations
-- **Upload Files**: Drag & drop files or click the attachment button
-- **Supported Types**: Text files, images, PDFs, JSON, CSV
-- **File Processing**: Automatic content analysis and extraction
+## Technology Stack
 
-#### Agent Management
-- **Switch Agents**: Different agents for coding, research, general chat
-- **Agent Configuration**: Customize agent parameters
-- **Web Worker Processing**: Parallel request handling
+- **Frontend**: Vanilla JavaScript with ES6 modules
+- **Build Tool**: Vite for fast development and optimized builds
+- **Styling**: Tailwind CSS with custom design system
+- **Backend**: Express.js proxy server for CORS handling
+- **Syntax Highlighting**: Prism.js
+- **Icons**: Font Awesome
 
-#### Chat Management
-- **Multiple Chats**: Create and switch between chat sessions
-- **Chat History**: Persistent conversation storage
-- **Export/Import**: Save conversations as JSON
+## Documentation
 
-## 🔧 Configuration
+All detailed documentation is available in the `docs/` folder:
 
-The application uses a centralized configuration system. Settings can be modified through the UI or programmatically:
+- [Architecture Overview](docs/AGNOSTIC_ARCHITECTURE.md)
+- [OpenAI Integration](docs/OPENAI_INTEGRATION.md)
+- [Anthropic Integration](docs/ANTHROPIC_INTEGRATION.md)
+- [DeepSeek Integration](docs/DEEPSEEK_REASONING_INTEGRATION.md)
+- [Proxy Server Setup](docs/PROXY_SERVER_SETUP.md)
+- [Conversation Mode](docs/CONVERSATION_MODE.md)
+- [Testing Checklist](docs/TESTING_CHECKLIST.md)
 
-```javascript
-// Example configuration
-{
-  app: {
-    theme: 'dark',
-    language: 'en',
-    debug: false
-  },
-  ui: {
-    sidebar: { defaultCollapsed: false },
-    chat: { maxHistoryItems: 100 }
-  },
-  agents: {
-    timeout: 30000,
-    retryAttempts: 3
-  },
-  files: {
-    maxFileSize: 10485760, // 10MB
-    allowedTypes: ['text/*', 'image/*', 'application/pdf']
-  }
-}
-```
+## Supported Providers
 
-## 🎨 UI Components
+- **OpenAI**: GPT-3.5, GPT-4, and other OpenAI models
+- **Anthropic**: Claude 3.5 Sonnet, Claude 3 Opus, and other Claude models
+- **DeepSeek**: DeepSeek models with reasoning capabilities
+- **LM Studio**: Local models via LM Studio
 
-### Main Layout
-- **Sidebar**: Chat history and navigation
-- **Chat Area**: Message display and input
-- **Header**: Current chat info and controls
-- **Modals**: Settings and file management
+## File Support
 
-### Key Features
-- **Responsive Design**: Adapts to different screen sizes
-- **Keyboard Shortcuts**: Ctrl+N (new chat), Ctrl+/ (toggle sidebar)
-- **Drag & Drop**: File upload support
-- **Typing Indicators**: Real-time feedback
-- **Notifications**: User feedback system
+The application supports various file types for analysis:
+- Text files (.txt, .md, .json, etc.)
+- Code files (.js, .py, .java, .cpp, etc.)
+- Documents (.pdf, .docx, etc.)
+- Images (with OCR capabilities)
 
-## 🔌 Extending the Application
+## Browser Compatibility
 
-### Adding New Agents
-```javascript
-const newAgent = {
-  id: 'custom-agent',
-  name: 'Custom Agent',
-  type: 'custom',
-  description: 'Specialized agent',
-  capabilities: ['custom-task'],
-  config: {
-    model: 'custom-model',
-    temperature: 0.5
-  }
-};
+- Chrome/Chromium (recommended)
+- Firefox
+- Safari
+- Edge
 
-eventBus.emit('agent:add', newAgent);
-```
+## License
 
-### Creating Custom Modules
-```javascript
-class CustomModule {
-  constructor(eventBus) {
-    this.eventBus = eventBus;
-  }
-  
-  async initialize() {
-    this.setupEventListeners();
-  }
-  
-  setupEventListeners() {
-    this.eventBus.on('custom:event', this.handleEvent.bind(this));
-  }
-}
-```
+This project is open source and available under the MIT License.
 
-## 🧪 Development
+## Contributing
 
-### Code Quality
-- **ES6+ Modules**: Modern JavaScript structure
-- **SOLID Principles**: Maintainable and extensible code
-- **Error Handling**: Comprehensive error management
-- **Documentation**: JSDoc comments throughout
-
-### Performance Optimizations
-- **Web Workers**: CPU-intensive tasks
-- **IndexedDB**: Efficient data storage
-- **Event Throttling**: Smooth user interactions
-- **Lazy Loading**: On-demand resource loading
-
-## 🌐 Browser Compatibility
-
-### Required Features
-- ES6 Modules
-- IndexedDB
-- Web Workers
-- File API
-
-### Optional Features
-- File System Access API (for enhanced file operations)
-- Drag & Drop API
-
-## 🔒 Privacy & Security
-
-- **Local Storage**: All data stored locally in browser
-- **No External Requests**: Fully client-side application
-- **File Security**: Safe file processing with validation
-- **XSS Protection**: Content sanitization
-
-## 📝 API Reference
-
-### EventBus Events
-- `chat:new` - Create new chat
-- `chat:message:send` - Send message
-- `agent:message:process` - Process with agent
-- `file:upload` - Handle file upload
-- `ui:notification` - Show notification
-
-### Storage Operations
-- `create(store, data)` - Create record
-- `read(store, key)` - Read record
-- `update(store, data)` - Update record
-- `delete(store, key)` - Delete record
-
-## 🤝 Contributing
-
-1. Follow the existing code structure
-2. Maintain SOLID principles
-3. Add comprehensive error handling
-4. Document new features
-5. Test across different browsers
-
-## 📄 License
-
-MIT License - Feel free to use and modify as needed.
-
-## 🆘 Troubleshooting
-
-### Common Issues
-1. **Module Loading Errors**: Ensure running on local server
-2. **Storage Issues**: Check browser storage permissions
-3. **File Upload Failures**: Verify file types and sizes
-4. **Web Worker Errors**: Check browser console for details
-
-### Browser Console
-Enable developer tools to see detailed logging and error messages. 
+Contributions are welcome! Please read the documentation in the `docs/` folder for development guidelines. 

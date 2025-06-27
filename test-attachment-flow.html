@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attachment Flow Test - MCP Tabajara</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        .test-container {
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: var(--chat-light);
+            border-radius: 12px;
+            border: 1px solid var(--chat-border);
+        }
+        
+        .test-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: var(--chat-input);
+            border-radius: 8px;
+            border: 1px solid var(--chat-border);
+        }
+        
+        .test-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: var(--chat-primary);
+        }
+        
+        .test-result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .test-result.success {
+            background-color: rgba(16, 185, 129, 0.1);
+            border: 1px solid var(--chat-primary);
+            color: var(--chat-primary);
+        }
+        
+        .test-result.error {
+            background-color: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--chat-error);
+            color: var(--chat-error);
+        }
+        
+        .test-result.info {
+            background-color: rgba(59, 130, 246, 0.1);
+            border: 1px solid var(--chat-info);
+            color: var(--chat-info);
+        }
+        
+        .attachment-preview {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.05);
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🔗 Attachment Flow Test</h1>
+        <p>This page tests the complete attachment flow from UI selection to processing.</p>
+        
+        <div class="test-section">
+            <div class="test-title">📎 File Selection Test</div>
+            <input type="file" id="test-file-input" multiple accept="*/*" class="mb-3">
+            <div id="attachment-preview" class="attachment-preview" style="display: none;"></div>
+            <button id="test-file-selection" class="bg-chat-primary text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                Test File Selection
+            </button>
+            <div id="file-selection-result" class="test-result" style="display: none;"></div>
+        </div>
+        
+        <div class="test-section">
+            <div class="test-title">📤 Send Message Test</div>
+            <textarea id="test-message" placeholder="Enter a test message..." class="w-full p-2 border rounded mb-3" rows="3">Please analyze the attached files.</textarea>
+            <button id="test-send-message" class="bg-chat-primary text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                Test Send Message
+            </button>
+            <div id="send-message-result" class="test-result" style="display: none;"></div>
+        </div>
+        
+        <div class="test-section">
+            <div class="test-title">🔄 Complete Flow Test</div>
+            <input type="file" id="flow-file-input" multiple accept="*/*" class="mb-3">
+            <textarea id="flow-message" placeholder="Enter a test message..." class="w-full p-2 border rounded mb-3" rows="3">Please analyze the attached files.</textarea>
+            <button id="test-complete-flow" class="bg-chat-primary text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                Test Complete Flow
+            </button>
+            <div id="complete-flow-result" class="test-result" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { FileAttachmentManager } from './js/modules/files/FileAttachmentManager.js';
+        import { EventBus } from './js/modules/core/EventBus.js';
+        import { FileManager } from './js/modules/files/FileManager.js';
+        import { UIManager } from './js/modules/ui/UIManager.js';
+
+        // Initialize components
+        const eventBus = new EventBus();
+        const fileManager = new FileManager(eventBus);
+        const attachmentManager = new FileAttachmentManager(eventBus, fileManager);
+        const uiManager = new UIManager(eventBus);
+
+        // Test results display function
+        function showResult(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = `test-result ${type}`;
+            element.style.display = 'block';
+        }
+
+        // Test 1: File Selection Test
+        document.getElementById('test-file-input').addEventListener('change', (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length > 0) {
+                const preview = document.getElementById('attachment-preview');
+                preview.style.display = 'block';
+                preview.innerHTML = `Selected ${files.length} file(s):\n${files.map(f => `- ${f.name} (${f.type}, ${(f.size / 1024).toFixed(1)} KB)`).join('\n')}`;
+            }
+        });
+
+        document.getElementById('test-file-selection').addEventListener('click', async () => {
+            const fileInput = document.getElementById('test-file-input');
+            const files = Array.from(fileInput.files);
+            
+            if (files.length === 0) {
+                showResult('file-selection-result', '⚠️ Please select files first', 'info');
+                return;
+            }
+            
+            try {
+                // Simulate UI file selection
+                uiManager.handleFileSelection({ target: { files: fileInput.files } });
+                
+                // Test getCurrentAttachments
+                const currentAttachments = uiManager.getCurrentAttachments();
+                const currentProvider = uiManager.getCurrentProvider();
+                
+                showResult('file-selection-result', 
+                    `✅ File selection test successful!\n\n` +
+                    `Files selected: ${files.length}\n` +
+                    `Current provider: ${currentProvider}\n` +
+                    `Current attachments: ${currentAttachments.length}\n\n` +
+                    `Files:\n${files.map(f => `- ${f.name} (${f.type}, ${(f.size / 1024).toFixed(1)} KB)`).join('\n')}`, 
+                    'success'
+                );
+            } catch (error) {
+                showResult('file-selection-result', 
+                    `❌ File selection test failed: ${error.message}`, 
+                    'error'
+                );
+            }
+        });
+
+        // Test 2: Send Message Test
+        document.getElementById('test-send-message').addEventListener('click', async () => {
+            const message = document.getElementById('test-message').value;
+            const currentAttachments = uiManager.getCurrentAttachments();
+            const currentProvider = uiManager.getCurrentProvider();
+            
+            if (!message.trim()) {
+                showResult('send-message-result', '⚠️ Please enter a message', 'info');
+                return;
+            }
+            
+            try {
+                // Simulate sending message with attachments
+                const messageData = {
+                    content: message,
+                    type: 'user',
+                    attachments: currentAttachments,
+                    providerId: currentProvider
+                };
+                
+                showResult('send-message-result', 
+                    `✅ Send message test successful!\n\n` +
+                    `Message: "${message}"\n` +
+                    `Provider: ${currentProvider}\n` +
+                    `Attachments: ${currentAttachments.length}\n\n` +
+                    `Message data:\n${JSON.stringify(messageData, null, 2)}`, 
+                    'success'
+                );
+                
+                // Simulate the event emission
+                eventBus.emit('chat:message:send', messageData);
+                
+            } catch (error) {
+                showResult('send-message-result', 
+                    `❌ Send message test failed: ${error.message}`, 
+                    'error'
+                );
+            }
+        });
+
+        // Test 3: Complete Flow Test
+        document.getElementById('flow-file-input').addEventListener('change', (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length > 0) {
+                // Simulate UI file selection
+                uiManager.handleFileSelection({ target: { files: e.target.files } });
+            }
+        });
+
+        document.getElementById('test-complete-flow').addEventListener('click', async () => {
+            const message = document.getElementById('flow-message').value;
+            const currentAttachments = uiManager.getCurrentAttachments();
+            const currentProvider = uiManager.getCurrentProvider();
+            
+            if (!message.trim()) {
+                showResult('complete-flow-result', '⚠️ Please enter a message', 'info');
+                return;
+            }
+            
+            if (currentAttachments.length === 0) {
+                showResult('complete-flow-result', '⚠️ Please select files first', 'info');
+                return;
+            }
+            
+            try {
+                showResult('complete-flow-result', '🔄 Testing complete flow...', 'info');
+                
+                // Step 1: Validate attachments
+                const validation = await attachmentManager.validateAttachments(currentAttachments, currentProvider);
+                
+                if (!validation.valid) {
+                    throw new Error(`Validation failed: ${JSON.stringify(validation.validations, null, 2)}`);
+                }
+                
+                // Step 2: Process attachments
+                const processedAttachments = await attachmentManager.processAttachments(currentAttachments, currentProvider);
+                
+                // Step 3: Simulate sending message
+                const messageData = {
+                    content: message,
+                    type: 'user',
+                    attachments: currentAttachments,
+                    providerId: currentProvider
+                };
+                
+                showResult('complete-flow-result', 
+                    `✅ Complete flow test successful!\n\n` +
+                    `📋 Flow Summary:\n` +
+                    `1. Files selected: ${currentAttachments.length}\n` +
+                    `2. Validation: ✅ Passed\n` +
+                    `3. Processing: ✅ ${processedAttachments.attachments.length} files processed\n` +
+                    `4. Provider: ${currentProvider}\n` +
+                    `5. Message: "${message}"\n\n` +
+                    `📎 Processed Attachments:\n${JSON.stringify(processedAttachments.attachments.map(att => ({
+                        name: att.name,
+                        type: att.type,
+                        processedType: att.processedData.type
+                    })), null, 2)}`, 
+                    'success'
+                );
+                
+            } catch (error) {
+                showResult('complete-flow-result', 
+                    `❌ Complete flow test failed: ${error.message}`, 
+                    'error'
+                );
+            }
+        });
+
+        // Initialize
+        async function init() {
+            try {
+                await fileManager.initialize();
+                await attachmentManager.initialize();
+                await uiManager.initialize();
+                
+                console.log('✅ Attachment flow test environment initialized successfully');
+            } catch (error) {
+                console.error('❌ Failed to initialize test environment:', error);
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html> 

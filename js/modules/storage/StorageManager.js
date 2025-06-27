@@ -5,12 +5,13 @@
 export class StorageManager {
     constructor() {
         this.dbName = 'MCPTabajaraDB';
-        this.dbVersion = 1;
+        this.dbVersion = 2;
         this.db = null;
         this.isIndexedDBSupported = this.checkIndexedDBSupport();
         this.stores = {
             chats: 'chats',
             messages: 'messages',
+            message_attachments: 'message_attachments',
             agents: 'agents',
             files: 'files',
             settings: 'settings',
@@ -52,14 +53,130 @@ export class StorageManager {
             request.onsuccess = () => {
                 this.db = request.result;
                 console.log('📦 IndexedDB initialized successfully');
-                resolve();
+                
+                // Verify all stores exist
+                this.verifyStores().then(() => {
+                    resolve();
+                }).catch(reject);
             };
 
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
+                console.log('🔄 Upgrading database from version', event.oldVersion, 'to', event.newVersion);
                 this.createStores(db);
             };
         });
+    }
+
+    /**
+     * Verify all required stores exist
+     */
+    async verifyStores() {
+        if (!this.db) return;
+        
+        const existingStores = Array.from(this.db.objectStoreNames);
+        const requiredStores = Object.values(this.stores);
+        
+        console.log('🔍 Existing stores:', existingStores);
+        console.log('🔍 Required stores:', requiredStores);
+        
+        const missingStores = requiredStores.filter(store => !existingStores.includes(store));
+        
+        if (missingStores.length > 0) {
+            console.warn('⚠️ Missing stores detected:', missingStores);
+            console.warn('🔄 Forcing database upgrade...');
+            
+            // Close current connection
+            this.db.close();
+            
+            // Delete the database to force recreation
+            await this.deleteDatabase();
+            
+            // Reinitialize
+            await this.initIndexedDB();
+        } else {
+            console.log('✅ All required stores verified');
+        }
+    }
+
+    /**
+     * Delete the database to force recreation
+     */
+    async deleteDatabase() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.deleteDatabase(this.dbName);
+            
+            request.onerror = () => {
+                console.error('Failed to delete database:', request.error);
+                reject(request.error);
+            };
+            
+            request.onsuccess = () => {
+                console.log('🗑️ Database deleted successfully');
+                resolve();
+            };
+        });
+    }
+
+    /**
+     * Force database upgrade to create missing stores
+     */
+    async forceUpgrade() {
+        if (!this.isIndexedDBSupported) return;
+        
+        console.log('🔄 Forcing database upgrade...');
+        
+        // Close current connection
+        if (this.db) {
+            this.db.close();
+        }
+        
+        // Delete and recreate database
+        await this.deleteDatabase();
+        await this.initIndexedDB();
+    }
+
+    /**
+     * Show current database schema
+     */
+    async showDatabaseSchema() {
+        try {
+            if (!this.isIndexedDBSupported || !this.db) {
+                return '❌ IndexedDB not available';
+            }
+            
+            const existingStores = Array.from(this.db.objectStoreNames);
+            const requiredStores = Object.values(this.stores);
+            const missingStores = requiredStores.filter(store => !existingStores.includes(store));
+            
+            let result = `📊 Database Schema:\n\n`;
+            result += `Database Name: ${this.dbName}\n`;
+            result += `Database Version: ${this.dbVersion}\n`;
+            result += `Storage Type: IndexedDB\n\n`;
+            
+            result += `Existing Stores:\n`;
+            existingStores.forEach(store => {
+                result += `  ✅ ${store}\n`;
+            });
+            
+            result += `\nRequired Stores:\n`;
+            requiredStores.forEach(store => {
+                const exists = existingStores.includes(store);
+                result += `  ${exists ? '✅' : '❌'} ${store}\n`;
+            });
+            
+            if (missingStores.length > 0) {
+                result += `\n❌ Missing Stores: ${missingStores.join(', ')}\n`;
+                result += `💡 Click "Clear Database" to recreate with new schema.`;
+            } else {
+                result += `\n✅ All required stores present!`;
+            }
+            
+            return result;
+            
+        } catch (error) {
+            return `❌ Error showing schema: ${error.message}`;
+        }
     }
 
     /**
@@ -79,6 +196,12 @@ export class StorageManager {
             messageStore.createIndex('chatId', 'chatId', { unique: false });
             messageStore.createIndex('timestamp', 'timestamp', { unique: false });
             messageStore.createIndex('role', 'role', { unique: false });
+        }
+
+        // Message attachments store
+        if (!db.objectStoreNames.contains(this.stores.message_attachments)) {
+            const attachmentStore = db.createObjectStore(this.stores.message_attachments, { keyPath: 'messageId' });
+            attachmentStore.createIndex('timestamp', 'timestamp', { unique: false });
         }
 
         // Agents store
@@ -124,7 +247,23 @@ export class StorageManager {
             throw new Error(`Store '${storeName}' does not exist`);
         }
 
+        // Check if the store exists in the database
         if (this.isIndexedDBSupported && this.db) {
+            const existingStores = Array.from(this.db.objectStoreNames);
+            if (!existingStores.includes(this.stores[storeName])) {
+                console.warn(`⚠️ Store '${storeName}' not found in database, attempting to create it...`);
+                try {
+                    await this.forceUpgrade();
+                    // After upgrade, check again
+                    const newExistingStores = Array.from(this.db.objectStoreNames);
+                    if (!newExistingStores.includes(this.stores[storeName])) {
+                        throw new Error(`Failed to create store '${storeName}' after database upgrade`);
+                    }
+                } catch (error) {
+                    console.error('❌ Failed to upgrade database:', error);
+                    throw new Error(`Store '${storeName}' does not exist and could not be created: ${error.message}`);
+                }
+            }
             return this.createIndexedDB(this.stores[storeName], data);
         } else {
             return this.createLocalStorage(storeName, data);
@@ -281,7 +420,7 @@ export class StorageManager {
 
     // localStorage fallback methods
     async createLocalStorage(storeName, data) {
-        const key = `${this.localStoragePrefix}${storeName}_${data.id}`;
+        const key = `${this.localStoragePrefix}${storeName}_${data.id || data.messageId}`;
         localStorage.setItem(key, JSON.stringify(data));
         return data;
     }
@@ -293,7 +432,7 @@ export class StorageManager {
     }
 
     async updateLocalStorage(storeName, data) {
-        const key = `${this.localStoragePrefix}${storeName}_${data.id}`;
+        const key = `${this.localStoragePrefix}${storeName}_${data.id || data.messageId}`;
         localStorage.setItem(key, JSON.stringify(data));
         return data;
     }
@@ -370,4 +509,124 @@ export class StorageManager {
 
         return stats;
     }
-} 
+
+    /**
+     * Test storage functionality
+     */
+    async testStorage() {
+        try {
+            const testData = {
+                id: 'test_' + Date.now(),
+                messageId: 'test_msg_' + Date.now(),
+                content: 'Test content',
+                timestamp: new Date().toISOString()
+            };
+
+            // Test basic operations
+            await this.create('chats', { ...testData, title: 'Test Chat' });
+            await this.create('messages', { ...testData, chatId: testData.id, role: 'user' });
+            await this.create('message_attachments', { 
+                messageId: testData.messageId, 
+                attachments: [{ id: 'test_att', name: 'test.jpg', type: 'image/jpeg', size: 1024 }],
+                timestamp: new Date().toISOString()
+            });
+
+            // Test reading
+            const chat = await this.read('chats', testData.id);
+            const message = await this.read('messages', testData.id);
+            const attachment = await this.read('message_attachments', testData.messageId);
+
+            // Test updating
+            await this.update('chats', { ...chat, title: 'Updated Test Chat' });
+
+            // Test getting all
+            const allChats = await this.getAll('chats');
+            const allMessages = await this.getAll('messages');
+            const allAttachments = await this.getAll('message_attachments');
+
+            // Clean up
+            await this.delete('chats', testData.id);
+            await this.delete('messages', testData.id);
+            await this.delete('message_attachments', testData.messageId);
+
+            return `✅ Storage test passed!\n\n` +
+                   `Storage Type: ${this.isIndexedDBSupported ? 'IndexedDB' : 'localStorage'}\n` +
+                   `Chats: ${allChats.length}\n` +
+                   `Messages: ${allMessages.length}\n` +
+                   `Attachments: ${allAttachments.length}\n` +
+                   `All stores working correctly!`;
+
+        } catch (error) {
+            return `❌ Storage test failed: ${error.message}`;
+        }
+    }
+
+    /**
+     * Test message attachments store specifically
+     */
+    async testMessageAttachmentsStore() {
+        try {
+            // First check if the store exists
+            if (this.isIndexedDBSupported && this.db) {
+                const existingStores = Array.from(this.db.objectStoreNames);
+                const hasAttachmentsStore = existingStores.includes('message_attachments');
+                
+                let result = `🔍 Message Attachments Store Test:\n\n`;
+                result += `Store exists: ${hasAttachmentsStore ? '✅ Yes' : '❌ No'}\n`;
+                result += `All existing stores: ${existingStores.join(', ')}\n\n`;
+                
+                if (!hasAttachmentsStore) {
+                    result += `❌ The message_attachments store is missing!\n`;
+                    result += `💡 Try clicking "Force Database Init" or "Clear Database" first.\n`;
+                    return result;
+                }
+            }
+            
+            // Test creating and reading from the store
+            const testMessageId = 'test_msg_' + Date.now();
+            const testAttachmentData = {
+                messageId: testMessageId,
+                attachments: [
+                    {
+                        id: 'test_att_1',
+                        name: 'test_image.jpg',
+                        type: 'image/jpeg',
+                        size: 1024,
+                        processedData: {
+                            type: 'image',
+                            data: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwA/8A'
+                        }
+                    }
+                ],
+                timestamp: new Date().toISOString()
+            };
+            
+            // Create
+            await this.create('message_attachments', testAttachmentData);
+            result += `✅ Created test attachment data\n`;
+            
+            // Read
+            const readData = await this.read('message_attachments', testMessageId);
+            result += `✅ Read test attachment data: ${readData ? 'Success' : 'Failed'}\n`;
+            
+            // Get all
+            const allAttachments = await this.getAll('message_attachments');
+            result += `✅ Total attachments in store: ${allAttachments.length}\n`;
+            
+            // Clean up
+            await this.delete('message_attachments', testMessageId);
+            result += `✅ Cleaned up test data\n\n`;
+            
+            result += `🎉 Message attachments store is working correctly!`;
+            
+            return result;
+            
+        } catch (error) {
+            return `❌ Message attachments store test failed: ${error.message}\n\n` +
+                   `💡 This usually means the store doesn't exist. Try:\n` +
+                   `1. Click "Show Database Schema" to see what stores exist\n` +
+                   `2. Click "Force Database Init" to recreate the database\n` +
+                   `3. Click "Clear Database" if the above doesn't work`;
+        }
+    }
+}

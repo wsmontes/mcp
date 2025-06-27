@@ -1,27 +1,22 @@
+import { BaseLLMClient } from './BaseLLMClient.js';
+
 /**
  * OpenAI Client - Handles communication with OpenAI's API
  * Supports GPT-4, GPT-3.5, and other OpenAI models with streaming and non-streaming responses
  */
-export class OpenAIClient {
+export class OpenAIClient extends BaseLLMClient {
     constructor(config = {}) {
-        this.apiKey = config.apiKey || '';
-        this.baseUrl = config.baseUrl || 'https://api.openai.com';
-        this.apiVersion = config.apiVersion || 'v1';
-        this.timeout = config.timeout || 60000; // OpenAI can be slower than local models
-        this.defaultModel = config.defaultModel || 'gpt-4o-mini';
+        super({
+            providerId: 'openai',
+            providerName: 'OpenAI',
+            baseUrl: 'https://api.openai.com',
+            apiVersion: 'v1',
+            timeout: 60000, // OpenAI can be slower than local models
+            defaultModel: 'gpt-4o-mini',
+            ...config
+        });
+
         this.organization = config.organization || null;
-        
-        // Performance tracking
-        this.metrics = {
-            totalRequests: 0,
-            successfulRequests: 0,
-            failedRequests: 0,
-            totalResponseTime: 0,
-            avgResponseTime: 0,
-            totalTokensUsed: 0,
-            totalCost: 0,
-            lastUpdated: Date.now()
-        };
 
         // Model pricing per 1K tokens (as of 2024)
         this.modelPricing = {
@@ -32,29 +27,49 @@ export class OpenAIClient {
             'gpt-3.5-turbo': { input: 0.0015, output: 0.002 },
             'gpt-3.5-turbo-instruct': { input: 0.0015, output: 0.002 }
         };
+
+        // Update capabilities for OpenAI
+        this.updateCapabilities({
+            streaming: true,
+            functionCalling: true,
+            vision: true,
+            imageGeneration: false, // Not via chat completions
+            reasoning: true,
+            maxContextLength: 128000, // GPT-4 context
+            supportedFormats: ['text', 'image'],
+            customParameters: ['temperature', 'top_p', 'frequency_penalty', 'presence_penalty', 'max_tokens'],
+            fileAttachments: true,
+            maxFileSize: 20 * 1024 * 1024, // 20MB
+            maxFiles: 10,
+            supportedFileTypes: ['text/*', 'image/*', 'application/pdf']
+        });
     }
 
     /**
      * Get available models from OpenAI
      */
     async getModels() {
-        if (!this.apiKey) {
+        if (!this.config.apiKey) {
             console.warn('OpenAI API key not configured');
-            return this.getDefaultModels();
+            return [];
         }
 
         try {
-            const response = await fetch(`${this.baseUrl}/${this.apiVersion}/models`, {
+            console.log('🔍 Fetching OpenAI models from API...');
+            const response = await fetch(`${this.config.baseUrl}/${this.config.apiVersion}/models`, {
                 method: 'GET',
                 headers: this.getHeaders(),
-                signal: AbortSignal.timeout(this.timeout)
+                signal: AbortSignal.timeout(this.config.timeout)
             });
 
             if (!response.ok) {
-                throw new Error(`Failed to fetch models: ${response.status}`);
+                const errorData = await response.json().catch(() => ({}));
+                console.error('❌ OpenAI model fetch failed:', response.status, errorData);
+                return [];
             }
 
             const data = await response.json();
+            console.log('📋 OpenAI API response:', data);
             
             // Filter and sort OpenAI models
             const openaiModels = data.data
@@ -63,41 +78,42 @@ export class OpenAIClient {
                     // Prioritize GPT-4 models, then GPT-3.5
                     const priority = { 'gpt-4o': 1, 'gpt-4o-mini': 2, 'gpt-4-turbo': 3, 'gpt-4': 4, 'gpt-3.5-turbo': 5 };
                     return (priority[a.id] || 99) - (priority[b.id] || 99);
-                });
+                })
+                .map(model => ({
+                    ...model,
+                    provider: 'openai',
+                    display_name: model.id // OpenAI models don't have display_name, use id
+                }));
 
-            return openaiModels.length > 0 ? openaiModels : this.getDefaultModels();
+            console.log(`✅ Successfully fetched ${openaiModels.length} OpenAI models`);
+            return openaiModels;
         } catch (error) {
-            console.error('Error fetching OpenAI models:', error);
-            return this.getDefaultModels();
+            console.error('❌ Error fetching OpenAI models:', error);
+            return [];
         }
-    }
-
-    /**
-     * Get default models when API is unavailable
-     */
-    getDefaultModels() {
-        return [
-            { id: 'gpt-4o', object: 'model', created: Date.now(), owned_by: 'openai' },
-            { id: 'gpt-4o-mini', object: 'model', created: Date.now(), owned_by: 'openai' },
-            { id: 'gpt-4-turbo', object: 'model', created: Date.now(), owned_by: 'openai' },
-            { id: 'gpt-4', object: 'model', created: Date.now(), owned_by: 'openai' },
-            { id: 'gpt-3.5-turbo', object: 'model', created: Date.now(), owned_by: 'openai' }
-        ];
     }
 
     /**
      * Create a chat completion (non-streaming)
      */
     async createChatCompletion(messages, options = {}) {
-        if (!this.apiKey) {
+        if (!this.config.apiKey) {
             throw new Error('OpenAI API key is required. Please configure it in settings.');
         }
 
         const startTime = Date.now();
         
+        // PATCH: Use correct formatting for attachments
+        let formattedMessages;
+        if (options.attachments && options.attachments.length > 0) {
+            formattedMessages = this.formatMessagesWithAttachments(messages, options.attachments);
+        } else {
+            formattedMessages = this.formatMessages(messages);
+        }
+
         const requestBody = {
-            model: options.model || this.defaultModel,
-            messages: messages,
+            model: options.model || this.config.defaultModel,
+            messages: formattedMessages,
             temperature: options.temperature ?? 0.7,
             max_tokens: options.maxTokens > 0 ? options.maxTokens : undefined,
             top_p: options.topP ?? 1,
@@ -107,14 +123,15 @@ export class OpenAIClient {
             ...options.additionalParams
         };
 
+        // Debug: Log the request body
+        console.log('OpenAI API Request:', requestBody);
+
         try {
-            this.metrics.totalRequests++;
-            
-            const response = await fetch(`${this.baseUrl}/${this.apiVersion}/chat/completions`, {
+            const response = await fetch(`${this.config.baseUrl}/${this.config.apiVersion}/chat/completions`, {
                 method: 'POST',
                 headers: this.getHeaders(),
                 body: JSON.stringify(requestBody),
-                signal: AbortSignal.timeout(this.timeout)
+                signal: AbortSignal.timeout(this.config.timeout)
             });
 
             if (!response.ok) {
@@ -133,7 +150,7 @@ export class OpenAIClient {
         } catch (error) {
             // Track failed request
             const responseTime = Date.now() - startTime;
-            this.updateMetrics(responseTime, false);
+            this.updateMetrics(responseTime, false, null, error);
             
             if (error.name === 'AbortError') {
                 throw new Error('Request timed out');
@@ -146,15 +163,23 @@ export class OpenAIClient {
      * Create a streaming chat completion
      */
     async createStreamingChatCompletion(messages, options = {}, onChunk = null) {
-        if (!this.apiKey) {
+        if (!this.config.apiKey) {
             throw new Error('OpenAI API key is required. Please configure it in settings.');
         }
 
         const startTime = Date.now();
         
+        // PATCH: Use correct formatting for attachments in streaming
+        let formattedMessages;
+        if (options.attachments && options.attachments.length > 0) {
+            formattedMessages = this.formatMessagesWithAttachments(messages, options.attachments);
+        } else {
+            formattedMessages = this.formatMessages(messages);
+        }
+        
         const requestBody = {
-            model: options.model || this.defaultModel,
-            messages: messages,
+            model: options.model || this.config.defaultModel,
+            messages: formattedMessages,
             temperature: options.temperature ?? 0.7,
             max_tokens: options.maxTokens > 0 ? options.maxTokens : undefined,
             top_p: options.topP ?? 1,
@@ -164,14 +189,15 @@ export class OpenAIClient {
             ...options.additionalParams
         };
 
+        // Debug: Log the request body for streaming
+        console.log('OpenAI Streaming API Request:', requestBody);
+
         try {
-            this.metrics.totalRequests++;
-            
-            const response = await fetch(`${this.baseUrl}/${this.apiVersion}/chat/completions`, {
+            const response = await fetch(`${this.config.baseUrl}/${this.config.apiVersion}/chat/completions`, {
                 method: 'POST',
                 headers: this.getHeaders(),
                 body: JSON.stringify(requestBody),
-                signal: AbortSignal.timeout(this.timeout)
+                signal: AbortSignal.timeout(this.config.timeout)
             });
 
             if (!response.ok) {
@@ -189,7 +215,7 @@ export class OpenAIClient {
         } catch (error) {
             // Track failed request
             const responseTime = Date.now() - startTime;
-            this.updateMetrics(responseTime, false);
+            this.updateMetrics(responseTime, false, null, error);
             
             if (error.name === 'AbortError') {
                 throw new Error('Request timed out');
@@ -295,16 +321,17 @@ export class OpenAIClient {
      * Test connection to OpenAI
      */
     async testConnection() {
-        if (!this.apiKey) {
+        if (!this.config.apiKey) {
             return {
                 connected: false,
                 error: 'API key not configured',
-                url: `${this.baseUrl}/${this.apiVersion}`
+                url: `${this.config.baseUrl}/${this.config.apiVersion}`,
+                provider: this.providerName
             };
         }
 
         try {
-            const response = await fetch(`${this.baseUrl}/${this.apiVersion}/models`, {
+            const response = await fetch(`${this.config.baseUrl}/${this.config.apiVersion}/models`, {
                 method: 'GET',
                 headers: this.getHeaders(),
                 signal: AbortSignal.timeout(10000)
@@ -313,15 +340,17 @@ export class OpenAIClient {
             return {
                 connected: response.ok,
                 status: response.status,
-                url: `${this.baseUrl}/${this.apiVersion}`,
-                hasApiKey: !!this.apiKey
+                url: `${this.config.baseUrl}/${this.config.apiVersion}`,
+                hasApiKey: !!this.config.apiKey,
+                provider: this.providerName
             };
         } catch (error) {
             return {
                 connected: false,
                 error: error.message,
-                url: `${this.baseUrl}/${this.apiVersion}`,
-                hasApiKey: !!this.apiKey
+                url: `${this.config.baseUrl}/${this.config.apiVersion}`,
+                hasApiKey: !!this.config.apiKey,
+                provider: this.providerName
             };
         }
     }
@@ -332,7 +361,7 @@ export class OpenAIClient {
     getHeaders() {
         const headers = {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.apiKey}`
+            'Authorization': `Bearer ${this.config.apiKey}`
         };
 
         if (this.organization) {
@@ -361,8 +390,11 @@ export class OpenAIClient {
      * Calculate cost based on usage
      */
     calculateCost(usage, model) {
-        const pricing = this.modelPricing[model];
-        if (!pricing || !usage) return 0;
+        if (!usage) return 0;
+        
+        const modelId = model || this.config.defaultModel;
+        const pricing = this.modelPricing[modelId];
+        if (!pricing) return 0;
 
         const inputCost = (usage.prompt_tokens / 1000) * pricing.input;
         const outputCost = (usage.completion_tokens / 1000) * pricing.output;
@@ -371,102 +403,23 @@ export class OpenAIClient {
     }
 
     /**
-     * Update metrics
-     */
-    updateMetrics(responseTime, success, usage = null) {
-        if (success) {
-            this.metrics.successfulRequests++;
-            this.metrics.totalResponseTime += responseTime;
-            this.metrics.avgResponseTime = this.metrics.totalResponseTime / this.metrics.successfulRequests;
-            
-            if (usage) {
-                this.metrics.totalTokensUsed += usage.total_tokens || 0;
-                this.metrics.totalCost += this.calculateCost(usage, this.defaultModel);
-            }
-        } else {
-            this.metrics.failedRequests++;
-        }
-        
-        this.metrics.lastUpdated = Date.now();
-    }
-
-    /**
-     * Get performance metrics
-     */
-    getMetrics() {
-        return {
-            ...this.metrics,
-            successRate: this.metrics.totalRequests > 0 
-                ? (this.metrics.successfulRequests / this.metrics.totalRequests * 100).toFixed(2) + '%'
-                : '0%',
-            avgCostPerRequest: this.metrics.successfulRequests > 0
-                ? (this.metrics.totalCost / this.metrics.successfulRequests).toFixed(4)
-                : '0'
-        };
-    }
-
-    /**
-     * Format messages for the API
-     */
-    formatMessages(messages) {
-        return messages.map(msg => ({
-            role: msg.role,
-            content: msg.content
-        }));
-    }
-
-    /**
-     * Create system message
-     */
-    createSystemMessage(content) {
-        return {
-            role: 'system',
-            content: content
-        };
-    }
-
-    /**
-     * Create user message
-     */
-    createUserMessage(content) {
-        return {
-            role: 'user',
-            content: content
-        };
-    }
-
-    /**
-     * Create assistant message
-     */
-    createAssistantMessage(content) {
-        return {
-            role: 'assistant',
-            content: content
-        };
-    }
-
-    /**
-     * Update configuration
+     * Override updateConfig to handle organization
      */
     updateConfig(newConfig) {
-        if (newConfig.apiKey !== undefined) this.apiKey = newConfig.apiKey;
-        if (newConfig.baseUrl) this.baseUrl = newConfig.baseUrl;
-        if (newConfig.apiVersion) this.apiVersion = newConfig.apiVersion;
-        if (newConfig.timeout) this.timeout = newConfig.timeout;
-        if (newConfig.defaultModel) this.defaultModel = newConfig.defaultModel;
-        if (newConfig.organization !== undefined) this.organization = newConfig.organization;
+        super.updateConfig(newConfig);
+        if (newConfig.organization !== undefined) {
+            this.organization = newConfig.organization;
+        }
     }
 
     /**
-     * Get current configuration
+     * Override getConfig to include organization
      */
     getConfig() {
+        const config = super.getConfig();
         return {
-            hasApiKey: !!this.apiKey,
-            baseUrl: this.baseUrl,
-            apiVersion: this.apiVersion,
-            timeout: this.timeout,
-            defaultModel: this.defaultModel,
+            ...config,
+            hasApiKey: !!this.config.apiKey,
             organization: this.organization
         };
     }
@@ -482,50 +435,194 @@ export class OpenAIClient {
      * Get model capabilities
      */
     getModelCapabilities(modelId) {
-        const capabilities = {
-            'gpt-4o': { 
-                contextLength: 128000, 
-                outputTokens: 4096, 
-                multimodal: true, 
-                tools: true,
-                description: 'Most advanced GPT-4 model with vision capabilities'
-            },
-            'gpt-4o-mini': { 
-                contextLength: 128000, 
-                outputTokens: 16384, 
-                multimodal: true, 
-                tools: true,
-                description: 'Faster, cheaper GPT-4 model with vision capabilities'
-            },
-            'gpt-4-turbo': { 
-                contextLength: 128000, 
-                outputTokens: 4096, 
-                multimodal: false, 
-                tools: true,
-                description: 'Latest GPT-4 model with improved performance'
-            },
-            'gpt-4': { 
-                contextLength: 8192, 
-                outputTokens: 4096, 
-                multimodal: false, 
-                tools: true,
-                description: 'Original GPT-4 model with high reasoning capabilities'
-            },
-            'gpt-3.5-turbo': { 
-                contextLength: 16385, 
-                outputTokens: 4096, 
-                multimodal: false, 
-                tools: true,
-                description: 'Fast and efficient model for most tasks'
-            }
+        // Check if model supports vision
+        const visionModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4-vision-preview'];
+        const hasVision = visionModels.some(model => modelId.includes(model));
+        
+        return {
+            vision: hasVision,
+            functionCalling: true,
+            streaming: true,
+            maxContextLength: modelId.includes('gpt-4') ? 128000 : 16385
         };
+    }
 
-        return capabilities[modelId] || {
-            contextLength: 4096,
-            outputTokens: 2048,
-            multimodal: false,
-            tools: false,
-            description: 'Standard OpenAI model'
+    // ========== FILE ATTACHMENT METHODS ==========
+
+    /**
+     * Process file attachments for OpenAI
+     */
+    async processFileAttachments(files) {
+        const processedAttachments = [];
+        
+        for (const file of files) {
+            try {
+                const processed = await this.processFileForOpenAI(file);
+                processedAttachments.push(processed);
+            } catch (error) {
+                console.error(`Failed to process file ${file.name}:`, error);
+                throw error;
+            }
+        }
+        
+        return processedAttachments;
+    }
+
+    /**
+     * Validate file attachments for OpenAI
+     */
+    async validateFileAttachments(files) {
+        const validations = [];
+        const maxSize = 20 * 1024 * 1024; // 20MB
+        const supportedTypes = ['text/*', 'image/*', 'application/pdf'];
+
+        for (const file of files) {
+            const validation = {
+                file: file.name,
+                valid: true,
+                error: null
+            };
+
+            // Check file size
+            if (file.size > maxSize) {
+                validation.valid = false;
+                validation.error = `File size (${(file.size / 1024 / 1024).toFixed(1)}MB) exceeds OpenAI limit (${maxSize / 1024 / 1024}MB)`;
+            }
+
+            // Check file type
+            const isSupported = supportedTypes.some(type => {
+                if (type.endsWith('/*')) {
+                    return file.type.startsWith(type.slice(0, -2));
+                }
+                return file.type === type;
+            });
+
+            if (!isSupported) {
+                validation.valid = false;
+                validation.error = `File type ${file.type} not supported by OpenAI`;
+            }
+
+            validations.push(validation);
+        }
+
+        return {
+            valid: validations.every(v => v.valid),
+            validations: validations
         };
+    }
+
+    /**
+     * Format messages with attachments for OpenAI
+     */
+    formatMessagesWithAttachments(messages, attachments) {
+        if (!attachments || attachments.length === 0) {
+            return this.formatMessages(messages);
+        }
+
+        const formattedMessages = [];
+        
+        for (const message of messages) {
+            const formattedMessage = { ...message };
+            
+            // Add attachments to user messages
+            if (message.role === 'user' && attachments.length > 0) {
+                formattedMessage.content = [
+                    { type: 'text', text: message.content },
+                    ...attachments.map(att => att.processedData)
+                ];
+            }
+            
+            formattedMessages.push(formattedMessage);
+        }
+        
+        return formattedMessages;
+    }
+
+    /**
+     * Process a single file for OpenAI
+     */
+    async processFileForOpenAI(file) {
+        let processedData;
+
+        if (file.type.startsWith('image/')) {
+            // Convert image to base64 with data URL format (OpenAI format)
+            const base64 = await this.fileToBase64(file);
+            processedData = {
+                type: 'image_url',
+                image_url: {
+                    url: base64, // OpenAI expects full data URL: "data:image/jpeg;base64,/9j/4AAQ..."
+                    detail: 'auto'
+                }
+            };
+        } else if (file.type === 'application/pdf') {
+            // Extract text from PDF
+            const text = await this.extractTextFromPDF(file);
+            processedData = {
+                type: 'text',
+                text: text
+            };
+        } else {
+            // Read as text
+            const text = await this.fileToText(file);
+            processedData = {
+                type: 'text',
+                text: text
+            };
+        }
+
+        return {
+            id: this.generateAttachmentId(),
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            processedData: processedData,
+            provider: 'openai'
+        };
+    }
+
+    /**
+     * Convert file to base64
+     */
+    async fileToBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    /**
+     * Convert file to text
+     */
+    async fileToText(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsText(file);
+        });
+    }
+
+    /**
+     * Extract text from PDF
+     */
+    async extractTextFromPDF(file) {
+        // This is a simplified implementation
+        // In a real application, you might want to use a PDF parsing library
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            // For now, return a placeholder - in practice you'd use a PDF parser
+            return `[PDF Content: ${file.name}] - Text extraction not implemented in this demo`;
+        } catch (error) {
+            throw new Error(`Failed to extract text from PDF: ${error.message}`);
+        }
+    }
+
+    /**
+     * Generate unique attachment ID
+     */
+    generateAttachmentId() {
+        return `att_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     }
 } 

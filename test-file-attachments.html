@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Attachment Test - MCP Tabajara</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .test-container {
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: var(--chat-light);
+            border-radius: 12px;
+            border: 1px solid var(--chat-border);
+        }
+        
+        .test-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: var(--chat-input);
+            border-radius: 8px;
+            border: 1px solid var(--chat-border);
+        }
+        
+        .test-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: var(--chat-primary);
+        }
+        
+        .test-result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        
+        .test-result.success {
+            background-color: rgba(16, 185, 129, 0.1);
+            border: 1px solid var(--chat-primary);
+            color: var(--chat-primary);
+        }
+        
+        .test-result.error {
+            background-color: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--chat-error);
+            color: var(--chat-error);
+        }
+        
+        .test-result.info {
+            background-color: rgba(59, 130, 246, 0.1);
+            border: 1px solid var(--chat-info);
+            color: var(--chat-info);
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>File Attachment System Test</h1>
+        <p>This page tests the file attachment functionality of the MCP Tabajara application.</p>
+        
+        <div class="test-section">
+            <div class="test-title">1. File Attachment Manager Test</div>
+            <button id="test-attachment-manager" class="bg-chat-primary text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                Test Attachment Manager
+            </button>
+            <div id="attachment-manager-result" class="test-result" style="display: none;"></div>
+        </div>
+        
+        <div class="test-section">
+            <div class="test-title">2. Provider Capabilities Test</div>
+            <button id="test-provider-capabilities" class="bg-chat-primary text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                Test Provider Capabilities
+            </button>
+            <div id="provider-capabilities-result" class="test-result" style="display: none;"></div>
+        </div>
+        
+        <div class="test-section">
+            <div class="test-title">3. File Validation Test</div>
+            <input type="file" id="test-file-input" multiple accept="*/*" class="mb-3">
+            <button id="test-file-validation" class="bg-chat-primary text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                Test File Validation
+            </button>
+            <div id="file-validation-result" class="test-result" style="display: none;"></div>
+        </div>
+        
+        <div class="test-section">
+            <div class="test-title">4. File Processing Test</div>
+            <input type="file" id="test-file-processing" multiple accept="*/*" class="mb-3">
+            <button id="test-file-processing-btn" class="bg-chat-primary text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                Test File Processing
+            </button>
+            <div id="file-processing-result" class="test-result" style="display: none;"></div>
+        </div>
+        
+        <div class="test-section">
+            <div class="test-title">5. UI Integration Test</div>
+            <button id="test-ui-integration" class="bg-chat-primary text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                Test UI Integration
+            </button>
+            <div id="ui-integration-result" class="test-result" style="display: none;"></div>
+        </div>
+        
+        <div class="test-section">
+            <div class="test-title">6. Streaming Attachment Test</div>
+            <input type="file" id="test-streaming-attachment" multiple accept="*/*" class="mb-3">
+            <button id="test-streaming-attachment-btn" class="bg-chat-primary text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                Test Streaming Attachment
+            </button>
+            <div id="streaming-attachment-result" class="test-result" style="display: none;"></div>
+        </div>
+        
+        <div class="test-section">
+            <div class="test-title">7. End-to-End Attachment Test</div>
+            <input type="file" id="test-e2e-attachment" multiple accept="*/*" class="mb-3">
+            <button id="test-e2e-attachment-btn" class="bg-chat-primary text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                Test Complete Flow
+            </button>
+            <div id="e2e-attachment-result" class="test-result" style="display: none;"></div>
+        </div>
+        
+        <div class="test-section">
+            <div class="test-title">8. LM Studio Image Attachment Test</div>
+            <p><strong>Prerequisites:</strong> LM Studio v0.3.13+ with vision-enabled model (like Gemma 3 4B) running on localhost:1234</p>
+            <input type="file" id="test-lmstudio-images" accept="image/*" multiple class="mb-3">
+            <textarea id="lmstudio-prompt" placeholder="Enter a prompt for the vision model..." class="w-full p-2 border rounded mb-3" rows="3">What do you see in this image? Please describe it in detail.</textarea>
+            <button id="test-lmstudio-images-btn" class="bg-chat-primary text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                Test LM Studio Vision
+            </button>
+            <div id="lmstudio-images-result" class="test-result" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { FileAttachmentManager } from './js/modules/files/FileAttachmentManager.js';
+        import { EventBus } from './js/modules/core/EventBus.js';
+        import { FileManager } from './js/modules/files/FileManager.js';
+        import { OpenAIClient } from './js/modules/agents/OpenAIClient.js';
+        import { AnthropicClient } from './js/modules/agents/AnthropicClient.js';
+        import { GeminiClient } from './js/modules/agents/GeminiClient.js';
+        import { LMStudioClient } from './js/modules/agents/LMStudioClient.js';
+
+        // Initialize components
+        const eventBus = new EventBus();
+        const fileManager = new FileManager(eventBus);
+        const attachmentManager = new FileAttachmentManager(eventBus, fileManager);
+
+        // Initialize test clients
+        const openaiClient = new OpenAIClient({
+            apiKey: 'test-key',
+            baseUrl: 'https://api.openai.com/v1',
+            defaultModel: 'gpt-4o'
+        });
+
+        const anthropicClient = new AnthropicClient({
+            apiKey: 'test-key',
+            baseUrl: 'https://api.anthropic.com',
+            defaultModel: 'claude-3-5-sonnet-20241022'
+        });
+
+        const geminiClient = new GeminiClient({
+            apiKey: 'test-key',
+            baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+            defaultModel: 'gemini-1.5-flash'
+        });
+
+        const lmstudioClient = new LMStudioClient({
+            baseUrl: 'http://localhost:1234',
+            defaultModel: 'gemma-3-4b'
+        });
+
+        // Test results display function
+        function showResult(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = `test-result ${type}`;
+            element.style.display = 'block';
+        }
+
+        // Test 1: Attachment Manager
+        document.getElementById('test-attachment-manager').addEventListener('click', async () => {
+            try {
+                const result = await attachmentManager.initialize();
+                
+                if (result.success) {
+                    const capabilities = attachmentManager.getAllProviderCapabilities();
+                    
+                    showResult('attachment-manager-result', 
+                        `✅ Attachment Manager initialized successfully!\n\nProvider Capabilities:\n${JSON.stringify(capabilities, null, 2)}`, 
+                        'success'
+                    );
+                } else {
+                    showResult('attachment-manager-result', 
+                        `❌ Attachment Manager initialization failed: ${result.error}`, 
+                        'error'
+                    );
+                }
+            } catch (error) {
+                showResult('attachment-manager-result', 
+                    `❌ Attachment Manager test failed: ${error.message}`, 
+                    'error'
+                );
+            }
+        });
+
+        // Test 2: Provider Capabilities
+        document.getElementById('test-provider-capabilities').addEventListener('click', () => {
+            try {
+                const capabilities = attachmentManager.getAllProviderCapabilities();
+                const openaiCapabilities = attachmentManager.getProviderCapabilities('openai');
+                const anthropicCapabilities = attachmentManager.getProviderCapabilities('anthropic');
+                const geminiCapabilities = attachmentManager.getProviderCapabilities('gemini');
+                const lmstudioCapabilities = attachmentManager.getProviderCapabilities('lmstudio');
+                
+                showResult('provider-capabilities-result', 
+                    `✅ Provider capabilities retrieved successfully!\n\nOpenAI: ${JSON.stringify(openaiCapabilities, null, 2)}\n\nAnthropic: ${JSON.stringify(anthropicCapabilities, null, 2)}\n\nGemini: ${JSON.stringify(geminiCapabilities, null, 2)}\n\nLM Studio: ${JSON.stringify(lmstudioCapabilities, null, 2)}`, 
+                    'success'
+                );
+            } catch (error) {
+                showResult('provider-capabilities-result', 
+                    `❌ Provider capabilities test failed: ${error.message}`, 
+                    'error'
+                );
+            }
+        });
+
+        // Test 3: File Validation
+        document.getElementById('test-file-validation').addEventListener('click', async () => {
+            const fileInput = document.getElementById('test-file-input');
+            const files = Array.from(fileInput.files);
+            
+            if (files.length === 0) {
+                showResult('file-validation-result', 
+                    '⚠️ Please select files first', 
+                    'info'
+                );
+                return;
+            }
+            
+            try {
+                const openaiValidation = await attachmentManager.validateAttachments(files, 'openai');
+                const anthropicValidation = await attachmentManager.validateAttachments(files, 'anthropic');
+                const geminiValidation = await attachmentManager.validateAttachments(files, 'gemini');
+                const lmstudioValidation = await attachmentManager.validateAttachments(files, 'lmstudio');
+                
+                showResult('file-validation-result', 
+                    `✅ File validation completed!\n\nOpenAI Validation: ${JSON.stringify(openaiValidation, null, 2)}\n\nAnthropic Validation: ${JSON.stringify(anthropicValidation, null, 2)}\n\nGemini Validation: ${JSON.stringify(geminiValidation, null, 2)}\n\nLM Studio Validation: ${JSON.stringify(lmstudioValidation, null, 2)}`, 
+                    'success'
+                );
+            } catch (error) {
+                showResult('file-validation-result', 
+                    `❌ File validation test failed: ${error.message}`, 
+                    'error'
+                );
+            }
+        });
+
+        // Test 4: File Processing
+        document.getElementById('test-file-processing-btn').addEventListener('click', async () => {
+            const fileInput = document.getElementById('test-file-processing');
+            const files = Array.from(fileInput.files);
+            
+            if (files.length === 0) {
+                showResult('file-processing-result', 
+                    '⚠️ Please select files first', 
+                    'info'
+                );
+                return;
+            }
+            
+            try {
+                const openaiProcessing = await attachmentManager.processAttachments(files, 'openai');
+                const anthropicProcessing = await attachmentManager.processAttachments(files, 'anthropic');
+                const geminiProcessing = await attachmentManager.processAttachments(files, 'gemini');
+                const lmstudioProcessing = await attachmentManager.processAttachments(files, 'lmstudio');
+                
+                showResult('file-processing-result', 
+                    `✅ File processing completed!\n\nOpenAI Processing: ${JSON.stringify(openaiProcessing, null, 2)}\n\nAnthropic Processing: ${JSON.stringify(anthropicProcessing, null, 2)}\n\nGemini Processing: ${JSON.stringify(geminiProcessing, null, 2)}\n\nLM Studio Processing: ${JSON.stringify(lmstudioProcessing, null, 2)}`, 
+                    'success'
+                );
+            } catch (error) {
+                showResult('file-processing-result', 
+                    `❌ File processing test failed: ${error.message}`, 
+                    'error'
+                );
+            }
+        });
+
+        // Test 5: UI Integration
+        document.getElementById('test-ui-integration').addEventListener('click', () => {
+            try {
+                // Test if UI elements can be created
+                const testElement = document.createElement('div');
+                testElement.className = 'attachment-item';
+                testElement.innerHTML = `
+                    <div class="attachment-icon">📄</div>
+                    <div class="attachment-details">
+                        <div class="attachment-name">test.txt</div>
+                        <div class="attachment-size">1.2 KB</div>
+                    </div>
+                    <button class="attachment-remove">×</button>
+                `;
+                
+                // Test if styles are applied
+                const computedStyle = window.getComputedStyle(testElement);
+                const hasStyles = computedStyle.display !== 'inline';
+                
+                showResult('ui-integration-result', 
+                    `✅ UI integration test completed!\n\nElement created: ${testElement.outerHTML}\nStyles applied: ${hasStyles}`, 
+                    'success'
+                );
+            } catch (error) {
+                showResult('ui-integration-result', 
+                    `❌ UI integration test failed: ${error.message}`, 
+                    'error'
+                );
+            }
+        });
+
+        // Test 6: Streaming Attachment Test
+        document.getElementById('test-streaming-attachment-btn').addEventListener('click', async () => {
+            const fileInput = document.getElementById('test-streaming-attachment');
+            const files = Array.from(fileInput.files);
+            
+            if (files.length === 0) {
+                showResult('streaming-attachment-result', 
+                    '⚠️ Please select files first', 
+                    'info'
+                );
+                return;
+            }
+            
+            try {
+                // Process files for all providers
+                const openaiAttachments = await attachmentManager.processAttachments(files, 'openai');
+                const anthropicAttachments = await attachmentManager.processAttachments(files, 'anthropic');
+                const geminiAttachments = await attachmentManager.processAttachments(files, 'gemini');
+                const lmstudioAttachments = await attachmentManager.processAttachments(files, 'lmstudio');
+                
+                // Test message formatting for streaming
+                const testMessages = [
+                    { role: 'user', content: 'Please analyze this file' }
+                ];
+                
+                // Test all providers' streaming formatting
+                const openaiFormatted = openaiClient.formatMessagesWithAttachments(testMessages, openaiAttachments.attachments);
+                const anthropicFormatted = anthropicClient.formatMessagesWithAttachments(testMessages, anthropicAttachments.attachments);
+                const geminiFormatted = geminiClient.formatMessagesWithAttachments(testMessages, geminiAttachments.attachments);
+                const lmstudioFormatted = lmstudioClient.formatMessagesWithAttachments(testMessages, lmstudioAttachments.attachments);
+                
+                showResult('streaming-attachment-result', 
+                    `✅ Streaming attachment test completed!\n\nOpenAI Formatted Messages: ${JSON.stringify(openaiFormatted, null, 2)}\n\nAnthropic Formatted Messages: ${JSON.stringify(anthropicFormatted, null, 2)}\n\nGemini Formatted Messages: ${JSON.stringify(geminiFormatted, null, 2)}\n\nLM Studio Formatted Messages: ${JSON.stringify(lmstudioFormatted, null, 2)}`, 
+                    'success'
+                );
+            } catch (error) {
+                showResult('streaming-attachment-result', 
+                    `❌ Streaming attachment test failed: ${error.message}`, 
+                    'error'
+                );
+            }
+        });
+
+        // Test 7: End-to-End Attachment Test
+        document.getElementById('test-e2e-attachment-btn').addEventListener('click', async () => {
+            const fileInput = document.getElementById('test-e2e-attachment');
+            const files = Array.from(fileInput.files);
+            
+            if (files.length === 0) {
+                showResult('e2e-attachment-result', 
+                    '⚠️ Please select files first', 
+                    'info'
+                );
+                return;
+            }
+            
+            try {
+                // Simulate the complete flow from UI to LLM client
+                console.log('🔄 Starting end-to-end attachment test...');
+                
+                // Step 1: UI gets files (simulate getCurrentAttachments)
+                const uiFiles = files;
+                console.log('📁 Step 1 - UI Files:', uiFiles.map(f => ({ name: f.name, type: f.type, size: f.size })));
+                
+                // Step 2: UI sends message with attachments (simulate chat:message:send)
+                const messageData = {
+                    content: 'Please analyze this file',
+                    type: 'user',
+                    attachments: uiFiles,
+                    providerId: 'openai'
+                };
+                console.log('📤 Step 2 - Message Data:', messageData);
+                
+                // Step 3: ChatManager processes attachments
+                const processedAttachments = await attachmentManager.processAttachments(uiFiles, 'openai');
+                console.log('🔧 Step 3 - Processed Attachments:', processedAttachments);
+                
+                // Step 4: ChatManager emits agent:message:process
+                const agentMessageData = {
+                    message: {
+                        id: 'test-message-id',
+                        chatId: 'test-chat-id',
+                        role: 'user',
+                        content: messageData.content,
+                        timestamp: new Date().toISOString()
+                    },
+                    attachments: processedAttachments.attachments,
+                    providerId: messageData.providerId
+                };
+                console.log('🤖 Step 4 - Agent Message Data:', agentMessageData);
+                
+                // Step 5: AgnosticMCPManager processes the message
+                const requestOptions = {
+                    attachments: processedAttachments.attachments,
+                    providerId: messageData.providerId,
+                    streaming: true
+                };
+                console.log('⚙️ Step 5 - Request Options:', requestOptions);
+                
+                // Step 6: LLM Client formats messages with attachments
+                const testMessages = [
+                    { role: 'user', content: messageData.content }
+                ];
+                const formattedMessages = openaiClient.formatMessagesWithAttachments(testMessages, processedAttachments.attachments);
+                console.log('📝 Step 6 - Formatted Messages:', formattedMessages);
+                
+                // Step 7: LLM Client creates streaming request
+                const streamingRequest = {
+                    model: 'gpt-4o',
+                    messages: formattedMessages,
+                    temperature: 0.7,
+                    stream: true
+                };
+                console.log('🚀 Step 7 - Streaming Request:', streamingRequest);
+                
+                showResult('e2e-attachment-result', 
+                    `✅ End-to-end attachment test completed successfully!\n\nFlow Summary:\n1. UI Files: ${uiFiles.length} files\n2. Processed Attachments: ${processedAttachments.attachments.length} attachments\n3. Provider: ${messageData.providerId}\n4. Streaming: ${requestOptions.streaming}\n5. Formatted Messages: ${formattedMessages.length} messages\n\nFinal Request Structure:\n${JSON.stringify(streamingRequest, null, 2)}`, 
+                    'success'
+                );
+                
+                console.log('✅ End-to-end attachment test completed successfully!');
+                
+            } catch (error) {
+                showResult('e2e-attachment-result', 
+                    `❌ End-to-end attachment test failed: ${error.message}`, 
+                    'error'
+                );
+                console.error('❌ End-to-end attachment test failed:', error);
+            }
+        });
+
+        // Test 8: LM Studio Image Attachment Test
+        document.getElementById('test-lmstudio-images-btn').addEventListener('click', async () => {
+            const fileInput = document.getElementById('test-lmstudio-images');
+            const files = Array.from(fileInput.files);
+            const prompt = document.getElementById('lmstudio-prompt').value;
+            
+            if (files.length === 0) {
+                showResult('lmstudio-images-result', 
+                    '⚠️ Please select images first', 
+                    'info'
+                );
+                return;
+            }
+            
+            try {
+                showResult('lmstudio-images-result', '🔄 Testing LM Studio image attachments...', 'info');
+                
+                // Step 1: Test connection to LM Studio
+                const connectionTest = await lmstudioClient.testConnection();
+                if (!connectionTest.success) {
+                    throw new Error(`LM Studio connection failed: ${connectionTest.error}`);
+                }
+                
+                // Step 2: Process image attachments
+                const processedAttachments = await attachmentManager.processAttachments(files, 'lmstudio');
+                console.log('📸 Step 2 - Processed Image Attachments:', processedAttachments);
+                
+                // Step 3: Format messages for LM Studio vision API
+                const testMessages = [{ role: 'user', content: prompt }];
+                const formattedMessages = lmstudioClient.formatMessagesWithAttachments(testMessages, processedAttachments.attachments);
+                console.log('📝 Step 3 - Formatted Messages for LM Studio:', formattedMessages);
+                
+                // Step 4: Create request structure (without sending)
+                const requestBody = {
+                    model: 'google/gemma-3-4b',
+                    messages: formattedMessages,
+                    temperature: 0.7,
+                    max_tokens: 1000,
+                    stream: false
+                };
+                
+                // Step 5: Analyze the request structure
+                const imageCount = processedAttachments.attachments.filter(att => att.processedData.type === 'image').length;
+                const textCount = processedAttachments.attachments.filter(att => att.processedData.type === 'text').length;
+                const hasImages = formattedMessages[0].images && formattedMessages[0].images.length > 0;
+                
+                showResult('lmstudio-images-result', 
+                    `✅ LM Studio image attachment test completed successfully!\n\n` +
+                    `📊 Test Results:\n` +
+                    `- Connection: ✅ Connected to LM Studio\n` +
+                    `- Files processed: ${processedAttachments.attachments.length}\n` +
+                    `- Images: ${imageCount}\n` +
+                    `- Text files: ${textCount}\n` +
+                    `- Images in message: ${hasImages ? 'Yes' : 'No'}\n` +
+                    `- Prompt: "${prompt}"\n\n` +
+                    `📋 Request Structure:\n${JSON.stringify(requestBody, null, 2)}\n\n` +
+                    `🔍 Message Analysis:\n${JSON.stringify(formattedMessages, null, 2)}`, 
+                    'success'
+                );
+                
+                console.log('✅ LM Studio image attachment test completed successfully!');
+                
+            } catch (error) {
+                showResult('lmstudio-images-result', 
+                    `❌ LM Studio image attachment test failed: ${error.message}`, 
+                    'error'
+                );
+                console.error('❌ LM Studio image attachment test failed:', error);
+            }
+        });
+
+        // Initialize
+        async function init() {
+            try {
+                await fileManager.initialize();
+                const result = await attachmentManager.initialize();
+                
+                if (result.success) {
+                    console.log('✅ Test environment initialized successfully');
+                } else {
+                    console.error('❌ Attachment Manager initialization failed:', result.error);
+                }
+            } catch (error) {
+                console.error('❌ Failed to initialize test environment:', error);
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html> 

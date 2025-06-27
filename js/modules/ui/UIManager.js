@@ -11,6 +11,10 @@ export class UIManager {
         this.sidebarCollapsed = false;
         this.isTyping = false;
         
+        // Auto-scroll settings
+        this.autoScroll = true;
+        this.scrollBehavior = 'smooth';
+        
         // Animation and interaction states
         this.animationQueue = [];
         this.isAnimating = false;
@@ -80,6 +84,15 @@ export class UIManager {
                 ['gl', { name: 'Galician', speechLang: 'gl-ES', fallbacks: [] }]
             ])
         };
+
+        // Chat management state
+        this.allChats = [];
+        this.currentSearchQuery = '';
+        this.currentFilter = 'all';
+        
+        // File attachment state
+        this.currentAttachments = [];
+        this.pendingAttachments = []; // Store attachments that are being processed
     }
 
     async initialize() {
@@ -93,6 +106,9 @@ export class UIManager {
         this.applyAppSettings(settings.app);
         this.applyVoiceSettings(settings.voice);
         this.applyLanguageSettings(settings.language);
+        
+        // Apply provider configurations from saved settings
+        this.applyProviderConfigurations(settings);
         
         console.log('🎨 UI Manager initialized');
     }
@@ -117,7 +133,7 @@ export class UIManager {
             // Header
             chatTitle: document.getElementById('chat-title'),
             agentStatus: document.getElementById('agent-status'),
-            agentSelector: document.getElementById('agent-selector'),
+            modelSelector: document.getElementById('model-selector'),
             currentModel: document.getElementById('current-model'),
             modelTemp: document.getElementById('model-temp'),
             
@@ -126,10 +142,18 @@ export class UIManager {
             chatHistory: document.getElementById('chat-history'),
             settingsBtn: document.getElementById('settings-btn'),
             
+            // Search and filters
+            chatSearch: document.getElementById('chat-search'),
+            filterAll: document.getElementById('filter-all'),
+            filterRecent: document.getElementById('filter-recent'),
+            filterArchived: document.getElementById('filter-archived'),
+            emptyChatState: document.getElementById('empty-chat-state'),
+            
             // Buttons
             voiceBtn: document.getElementById('voice-btn'),
             conversationBtn: document.getElementById('conversation-btn'),
             fileUploadBtn: document.getElementById('file-upload-btn'),
+            debugAttachmentBtn: document.getElementById('debug-attachment-btn'),
             moreOptions: document.getElementById('more-options'),
             
             // Modals
@@ -144,7 +168,14 @@ export class UIManager {
             quickActionBtns: document.querySelectorAll('.quick-action-btn'),
             
             // File input
-            fileInput: document.getElementById('file-input')
+            fileInput: document.getElementById('file-input'),
+            
+            // File attachment UI
+            attachmentContainer: document.getElementById('attachment-container'),
+            attachmentList: document.getElementById('attachment-list'),
+            attachmentPreview: document.getElementById('attachment-preview'),
+            attachmentRemoveBtn: document.getElementById('attachment-remove-btn'),
+            attachmentInfo: document.getElementById('attachment-info')
         };
     }
 
@@ -160,6 +191,24 @@ export class UIManager {
         // New chat button
         this.elements.newChatBtn?.addEventListener('click', () => {
             this.eventBus.emit('chat:new');
+        });
+
+        // Search functionality
+        this.elements.chatSearch?.addEventListener('input', (e) => {
+            this.handleChatSearch(e.target.value);
+        });
+
+        // Filter buttons
+        this.elements.filterAll?.addEventListener('click', () => {
+            this.setActiveFilter('all');
+        });
+
+        this.elements.filterRecent?.addEventListener('click', () => {
+            this.setActiveFilter('recent');
+        });
+
+        this.elements.filterArchived?.addEventListener('click', () => {
+            this.setActiveFilter('archived');
         });
 
         // Message input
@@ -186,8 +235,13 @@ export class UIManager {
             this.elements.fileInput?.click();
         });
 
-        this.elements.fileInput?.addEventListener('change', (e) => {
-            this.handleFileUpload(e);
+        this.elements.fileInput?.addEventListener('change', (event) => {
+            this.handleFileSelection(event);
+        });
+
+        // Debug attachment button
+        this.elements.debugAttachmentBtn?.addEventListener('click', () => {
+            this.debugAttachmentSystem();
         });
 
         // Voice button
@@ -202,19 +256,19 @@ export class UIManager {
 
         // Quick actions
         this.elements.quickActionBtns?.forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                this.handleQuickAction(e);
-            });
+            btn.addEventListener('click', this.handleQuickAction.bind(this));
         });
 
         // Settings button
         if (this.elements.settingsBtn) {
-            this.elements.settingsBtn.addEventListener('click', this.showSettings.bind(this));
+            this.elements.settingsBtn.addEventListener('click', () => {
+                this.showSettings();
+            });
         }
 
-        // Agent selector
-        this.elements.agentSelector?.addEventListener('change', (e) => {
-            this.handleAgentChange(e.target.value);
+        // Model selector (unified)
+        this.elements.modelSelector?.addEventListener('change', (e) => {
+            this.handleModelChange(e.target.value);
         });
 
         // More options button
@@ -229,15 +283,21 @@ export class UIManager {
             }
         });
 
-        // Global keyboard shortcuts
-        document.addEventListener('keydown', (e) => {
-            this.handleGlobalKeyboard(e);
+        // Chat container scroll events
+        this.elements.chatContainer?.addEventListener('scroll', () => {
+            // Show/hide scroll to bottom button based on scroll position
+            if (this.isNearBottom()) {
+                this.hideScrollToBottomButton();
+            } else {
+                this.showScrollToBottomButton();
+            }
         });
 
+        // Global keyboard shortcuts
+        document.addEventListener('keydown', this.handleGlobalKeyboard.bind(this));
+        
         // Window resize
-        window.addEventListener('resize', () => {
-            this.handleResize();
-        });
+        window.addEventListener('resize', this.handleResize.bind(this));
 
         // Event bus listeners
         this.setupEventBusListeners();
@@ -259,12 +319,18 @@ export class UIManager {
             // Insert before conversation button
             this.elements.conversationBtn.parentNode.insertBefore(languageBtn, this.elements.conversationBtn);
         }
+
+        // Attachment remove button
+        this.elements.attachmentRemoveBtn?.addEventListener('click', () => {
+            this.removeCurrentAttachment();
+        });
     }
 
     /**
      * Set up event bus listeners
      */
     setupEventBusListeners() {
+        // Combined message received handler to prevent duplicates
         this.eventBus.on('chat:message:received', (message) => {
             // For conversation mode user messages, display the original transcript
             // instead of the language-instructed version
@@ -277,7 +343,23 @@ export class UIManager {
                 console.log('🎤 Displaying original transcript for conversation mode:', message.metadata.originalTranscript);
             }
             
+            // Display the message
             this.displayMessage(displayMessage);
+            
+            // Auto-speak AI responses in conversation mode
+            console.log('📨 Message received event:', {
+                role: message.role,
+                conversationActive: this.conversationActive,
+                content: message.content?.substring(0, 50) + '...'
+            });
+            
+            if (message.role === 'assistant' && this.conversationActive) {
+                console.log('🎯 Triggering speech synthesis for assistant message');
+                // Small delay to ensure message is displayed first
+                setTimeout(() => {
+                    this.speakResponse(message);
+                }, 100);
+            }
         });
 
         this.eventBus.on('chat:typing:start', () => {
@@ -321,12 +403,13 @@ export class UIManager {
             this.updateConnectionStatus(false, [], data.error);
         });
 
-        this.eventBus.on('agents:loaded', (agents) => {
-            this.updateAgentSelector(agents);
+        this.eventBus.on('models:loaded', (models) => {
+            this.updateModelSelector(models);
         });
 
-        this.eventBus.on('agent:selected', (agent) => {
-            this.updateCurrentAgentInfo(agent);
+        this.eventBus.on('model:selected', (data) => {
+            this.updateCurrentModelInfo(data);
+            this.updateAgentStatus(data);
         });
 
         this.eventBus.on('message:delete', (data) => {
@@ -352,21 +435,71 @@ export class UIManager {
             this.showAgentEditor(agentData);
         });
 
-        // Auto-speak AI responses in conversation mode
-        this.eventBus.on('chat:message:received', (message) => {
-            console.log('📨 Message received event:', {
-                role: message.role,
-                conversationActive: this.conversationActive,
-                content: message.content?.substring(0, 50) + '...'
-            });
-            
-            if (message.role === 'assistant' && this.conversationActive) {
-                console.log('🎯 Triggering speech synthesis for assistant message');
-                // Small delay to ensure message is displayed first
-                setTimeout(() => {
-                    this.speakResponse(message);
-                }, 100);
-            }
+        // Handle messages loaded when selecting a chat
+        this.eventBus.on('chat:messages:loaded', (messages) => {
+            this.displayMessages(messages);
+        });
+
+        this.eventBus.on('chat:created', (newChat) => {
+            // The chat:history:updated event will handle updating the display
+            // with the properly sorted list, so we don't need to manually add it here
+            console.log('New chat created:', newChat.id);
+        });
+
+        this.eventBus.on('chat:deleted', (chatId) => {
+            // The chat:history:updated event will handle updating the display
+            // with the properly sorted list, so we don't need to manually remove it here
+            console.log('Chat deleted:', chatId);
+        });
+
+        this.eventBus.on('chat:history:updated', (chats) => {
+            this.updateChatHistory(chats);
+        });
+
+        this.eventBus.on('chat:renamed', (chatId, newTitle) => {
+            // The chat:history:updated event will handle updating the display
+            // with the properly sorted list, so we don't need to manually update it here
+            console.log('Chat renamed:', chatId, newTitle);
+        });
+
+        this.eventBus.on('chat:archived', (chatId) => {
+            // The chat:history:updated event will handle updating the display
+            // with the properly sorted list, so we don't need to manually update it here
+            console.log('Chat archived:', chatId);
+        });
+
+        this.eventBus.on('chat:cleared', (chatId) => {
+            // The chat:history:updated event will handle updating the display
+            // with the properly sorted list, so we don't need to manually update it here
+            console.log('Chat cleared:', chatId);
+        });
+
+        this.eventBus.on('chat:updated', (updatedChat) => {
+            // The chat:history:updated event will handle updating the display
+            // with the properly sorted list, so we don't need to manually update it here
+            console.log('Chat updated:', updatedChat.id);
+        });
+
+        this.eventBus.on('message:attachments:updated', (data) => {
+            this.updateMessageAttachments(data.messageId, data.attachments);
+        });
+
+        this.eventBus.on('attachment:capabilities:loaded', (capabilities) => {
+            this.updateAttachmentCapabilities(capabilities);
+        });
+
+        // Handle attachment processing completion
+        this.eventBus.on('attachment:processed', (data) => {
+            console.log('📎 Attachment processing completed:', data);
+            // Clear pending attachments after successful processing
+            this.pendingAttachments = [];
+        });
+
+        this.eventBus.on('attachment:error', (error) => {
+            console.error('❌ Attachment processing error:', error);
+            // Clear pending attachments on error
+            this.pendingAttachments = [];
+            this.showError({ message: `Attachment processing failed: ${error.message}` });
         });
     }
 
@@ -437,21 +570,66 @@ export class UIManager {
      * Handle global keyboard shortcuts
      */
     handleGlobalKeyboard(event) {
-        // Ctrl/Cmd + N - New chat
-        if ((event.ctrlKey || event.metaKey) && event.key === 'n') {
+        // Only handle shortcuts when not typing in input fields
+        if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+            return;
+        }
+
+        const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+        const cmdOrCtrl = isMac ? event.metaKey : event.ctrlKey;
+
+        // New chat: Cmd/Ctrl + N
+        if (cmdOrCtrl && event.key === 'n') {
             event.preventDefault();
             this.eventBus.emit('chat:new');
         }
 
-        // Ctrl/Cmd + / - Toggle sidebar
-        if ((event.ctrlKey || event.metaKey) && event.key === '/') {
+        // Search conversations: Cmd/Ctrl + K
+        if (cmdOrCtrl && event.key === 'k') {
+            event.preventDefault();
+            this.elements.chatSearch?.focus();
+        }
+
+        // Toggle sidebar: Cmd/Ctrl + B
+        if (cmdOrCtrl && event.key === 'b') {
             event.preventDefault();
             this.toggleSidebar();
         }
 
-        // Escape - Close modal
+        // Clear current chat: Cmd/Ctrl + Shift + K
+        if (cmdOrCtrl && event.shiftKey && event.key === 'K') {
+            event.preventDefault();
+            this.clearCurrentChat();
+        }
+
+        // Export current chat: Cmd/Ctrl + E
+        if (cmdOrCtrl && event.key === 'e') {
+            event.preventDefault();
+            if (this.currentChatId) {
+                this.exportChat(this.currentChatId);
+            }
+        }
+
+        // Focus message input: Cmd/Ctrl + L
+        if (cmdOrCtrl && event.key === 'l') {
+            event.preventDefault();
+            this.elements.messageInput?.focus();
+        }
+
+        // Toggle conversation mode: Cmd/Ctrl + M
+        if (cmdOrCtrl && event.key === 'm') {
+            event.preventDefault();
+            this.toggleConversationMode();
+        }
+
+        // Escape key: Close modals, clear search
         if (event.key === 'Escape') {
-            this.hideModal();
+            if (this.elements.modalOverlay && !this.elements.modalOverlay.classList.contains('hidden')) {
+                this.hideModal();
+            } else if (this.elements.chatSearch && this.elements.chatSearch.value) {
+                this.elements.chatSearch.value = '';
+                this.handleChatSearch('');
+            }
         }
     }
 
@@ -466,11 +644,30 @@ export class UIManager {
             // Handle message editing
             this.handleMessageEdit(message);
         } else {
-            // Send new message
+            // Get current attachments from pending attachments
+            const attachments = this.pendingAttachments.length > 0 ? this.pendingAttachments : this.getCurrentAttachments();
+            const currentProvider = this.getCurrentProvider();
+            
+            // Send new message with attachments
             this.eventBus.emit('chat:message:send', {
                 content: message,
-                type: 'user'
+                type: 'user',
+                attachments: attachments,
+                providerId: currentProvider
             });
+            
+            // Clear attachments after sending (but keep them in memory until processing is complete)
+            if (attachments && attachments.length > 0) {
+                // Clear the file input but keep pendingAttachments for processing
+                if (this.elements.fileInput) {
+                    this.elements.fileInput.value = '';
+                }
+                // Clear pending attachments after a short delay to ensure processing is complete
+                setTimeout(() => {
+                    this.pendingAttachments = [];
+                    this.clearCurrentAttachments();
+                }, 1000);
+            }
         }
 
         // Clear input
@@ -529,24 +726,61 @@ export class UIManager {
         // Apply syntax highlighting
         this.applySyntaxHighlighting(messageElement);
         
-        this.scrollToBottom();
+        // Ensure proper word wrapping
+        this.handleResize();
+        
+        // Force scroll to bottom for new messages
+        this.forceScrollToBottom();
         
         // Animate message in
         this.animateMessageIn(messageElement);
     }
 
     /**
+     * Display multiple messages (for chat loading)
+     */
+    displayMessages(messages) {
+        console.log('📋 Displaying multiple messages:', messages.length);
+        
+        // Clear existing messages first
+        if (this.elements.chatMessages) {
+            this.elements.chatMessages.innerHTML = '';
+        }
+        
+        // Sort messages by timestamp to ensure correct order (ascending - oldest first)
+        const sortedMessages = [...messages].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        
+        // Display each message in order
+        sortedMessages.forEach(message => {
+            const messageElement = this.createMessageElement(message);
+            this.elements.chatMessages?.appendChild(messageElement);
+            
+            // Apply syntax highlighting
+            this.applySyntaxHighlighting(messageElement);
+        });
+        
+        // Force scroll to bottom after all messages are displayed
+        this.forceScrollToBottom();
+        
+        // Ensure proper word wrapping for all messages
+        this.handleResize();
+        
+        console.log('✅ All messages displayed in chronological order');
+    }
+
+    /**
      * Handle streaming message updates
      */
     handleStreamingMessage(data) {
-        const { chatId, content, finished } = data;
+        const { chatId, content, reasoningContent, finished } = data;
         
-        console.log('🎬 Streaming message update:', {
-            chatId,
-            contentLength: content?.length,
-            finished,
-            conversationActive: this.conversationActive
-        });
+        // console.log('🎬 Streaming message update:', {
+        //     chatId,
+        //     contentLength: content?.length,
+        //     reasoningContentLength: reasoningContent?.length,
+        //     finished,
+        //     conversationActive: this.conversationActive
+        // });
         
         // Find existing streaming message or create new one
         let streamingElement = this.elements.chatMessages?.querySelector('.streaming-message');
@@ -558,6 +792,7 @@ export class UIManager {
                 chatId: chatId,
                 role: 'assistant',
                 content: content,
+                reasoningContent: reasoningContent,
                 timestamp: new Date().toISOString(),
                 streaming: true
             };
@@ -565,12 +800,49 @@ export class UIManager {
             streamingElement = this.createMessageElement(message);
             streamingElement.classList.add('streaming-message');
             this.elements.chatMessages?.appendChild(streamingElement);
+            
+            // Force scroll to bottom for new streaming message
+            this.forceScrollToBottom();
         } else {
             // Update existing streaming message
             const contentElement = streamingElement.querySelector('.prose');
             if (contentElement) {
                 contentElement.innerHTML = this.formatMessageContent(content);
             }
+            
+            // Update reasoning content if available
+            if (reasoningContent !== undefined) {
+                let reasoningContainer = streamingElement.querySelector('.reasoning-container');
+                if (!reasoningContainer) {
+                    // Create reasoning container if it doesn't exist
+                    reasoningContainer = document.createElement('div');
+                    reasoningContainer.className = 'reasoning-container mt-4 p-3 bg-chat-light border border-chat-border rounded-lg';
+                    
+                    const reasoningHeader = document.createElement('div');
+                    reasoningHeader.className = 'flex items-center gap-2 mb-2 text-sm font-medium text-chat-secondary';
+                    reasoningHeader.innerHTML = '<i class="fas fa-brain"></i> Chain of Thought Reasoning';
+                    
+                    const reasoningContentElement = document.createElement('div');
+                    reasoningContentElement.className = 'reasoning-content prose prose-invert max-w-none break-words overflow-hidden text-sm';
+                    
+                    reasoningContainer.appendChild(reasoningHeader);
+                    reasoningContainer.appendChild(reasoningContentElement);
+                    
+                    // Insert before the main content
+                    const mainContent = streamingElement.querySelector('.prose');
+                    if (mainContent) {
+                        mainContent.parentNode.insertBefore(reasoningContainer, mainContent);
+                    }
+                }
+                
+                const reasoningContentElement = reasoningContainer.querySelector('.reasoning-content');
+                if (reasoningContentElement) {
+                    reasoningContentElement.innerHTML = this.formatMessageContent(reasoningContent);
+                }
+            }
+            
+            // Scroll to bottom during streaming updates
+            this.scrollToBottom();
         }
         
         // Add blinking cursor for streaming
@@ -579,6 +851,9 @@ export class UIManager {
             if (contentElement && !contentElement.innerHTML.includes('streaming-cursor')) {
                 contentElement.innerHTML += '<span class="streaming-cursor animate-pulse">▋</span>';
             }
+            
+            // Ensure proper word wrapping during streaming
+            this.handleResize();
         } else {
             // Remove streaming indicators when finished
             streamingElement.classList.remove('streaming-message');
@@ -594,6 +869,7 @@ export class UIManager {
                 chatId: chatId,
                 role: 'assistant',
                 content: content,
+                reasoningContent: reasoningContent,
                 timestamp: new Date().toISOString(),
                 streaming: false
             };
@@ -613,9 +889,10 @@ export class UIManager {
             
             // Apply syntax highlighting when streaming is complete
             this.applySyntaxHighlighting(streamingElement);
+            
+            // Final scroll to bottom when streaming is complete
+            this.forceScrollToBottom();
         }
-        
-        this.scrollToBottom();
     }
 
     /**
@@ -637,9 +914,44 @@ export class UIManager {
         const content = document.createElement('div');
         content.className = 'flex-1 relative';
         
+        // Create main message content
         const messageContent = document.createElement('div');
-        messageContent.className = 'prose prose-invert max-w-none';
+        messageContent.className = 'prose prose-invert max-w-none break-words overflow-hidden';
         messageContent.innerHTML = this.formatMessageContent(message.content);
+        
+        // Add attachments if present
+        if (message.metadata?.attachments && message.metadata.attachments.length > 0) {
+            const attachmentContainer = document.createElement('div');
+            attachmentContainer.className = 'message-attachments mt-3 space-y-2';
+            
+            message.metadata.attachments.forEach(attachment => {
+                const attachmentElement = this.createMessageAttachmentElement(attachment);
+                attachmentContainer.appendChild(attachmentElement);
+            });
+            
+            // Add attachment container before the main content
+            content.appendChild(attachmentContainer);
+        }
+        
+        // Add reasoning content if available (for DeepSeek reasoning model)
+        if (message.reasoningContent && message.role === 'assistant') {
+            const reasoningContainer = document.createElement('div');
+            reasoningContainer.className = 'mt-4 p-3 bg-chat-light border border-chat-border rounded-lg';
+            
+            const reasoningHeader = document.createElement('div');
+            reasoningHeader.className = 'flex items-center gap-2 mb-2 text-sm font-medium text-chat-secondary';
+            reasoningHeader.innerHTML = '<i class="fas fa-brain"></i> Chain of Thought Reasoning';
+            
+            const reasoningContent = document.createElement('div');
+            reasoningContent.className = 'prose prose-invert max-w-none break-words overflow-hidden text-sm';
+            reasoningContent.innerHTML = this.formatMessageContent(message.reasoningContent);
+            
+            reasoningContainer.appendChild(reasoningHeader);
+            reasoningContainer.appendChild(reasoningContent);
+            
+            // Add reasoning container before the main content
+            content.appendChild(reasoningContainer);
+        }
         
         const messageFooter = document.createElement('div');
         messageFooter.className = 'flex items-center justify-between mt-1';
@@ -712,11 +1024,11 @@ export class UIManager {
             const language = lang || 'text';
             const escapedCode = this.escapeHtml(code.trim());
             const highlightedCode = this.highlightCode(escapedCode, language);
-            return `<pre class="bg-chat-light p-3 rounded-lg border border-chat-border my-2 overflow-x-auto"><code class="language-${language}">${highlightedCode}</code></pre>`;
+            return `<pre class="bg-chat-light p-3 rounded-lg border border-chat-border my-2 overflow-x-auto break-words"><code class="language-${language} break-words">${highlightedCode}</code></pre>`;
         });
         
         // Inline code
-        formatted = formatted.replace(/`([^`]+)`/g, '<code class="bg-chat-hover px-1 rounded text-green-400">$1</code>');
+        formatted = formatted.replace(/`([^`]+)`/g, '<code class="bg-chat-hover px-1 rounded text-green-400 break-words">$1</code>');
         
         // Bold text
         formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -725,16 +1037,16 @@ export class UIManager {
         formatted = formatted.replace(/\*([^*]+)\*/g, '<em>$1</em>');
         
         // Links
-        formatted = formatted.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="text-blue-400 hover:underline">$1</a>');
+        formatted = formatted.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="text-blue-400 hover:underline break-all">$1</a>');
         
         // Lists
-        formatted = formatted.replace(/^\* (.+)$/gm, '<li class="ml-4">• $1</li>');
-        formatted = formatted.replace(/^\d+\. (.+)$/gm, '<li class="ml-4">$1</li>');
+        formatted = formatted.replace(/^\* (.+)$/gm, '<li class="ml-4 break-words">• $1</li>');
+        formatted = formatted.replace(/^\d+\. (.+)$/gm, '<li class="ml-4 break-words">$1</li>');
         
         // Tables (basic)
         formatted = formatted.replace(/\|(.+)\|/g, (match, content) => {
             const cells = content.split('|').map(cell => cell.trim());
-            return '<tr>' + cells.map(cell => `<td class="border border-chat-border px-2 py-1">${cell}</td>`).join('') + '</tr>';
+            return '<tr>' + cells.map(cell => `<td class="border border-chat-border px-2 py-1 break-words">${cell}</td>`).join('') + '</tr>';
         });
         
         // Line breaks
@@ -784,7 +1096,14 @@ export class UIManager {
      */
     async copyMessage(message) {
         try {
-            await navigator.clipboard.writeText(message.content);
+            let textToCopy = message.content;
+            
+            // Include reasoning content if available
+            if (message.reasoningContent) {
+                textToCopy = `Chain of Thought Reasoning:\n${message.reasoningContent}\n\nFinal Answer:\n${message.content}`;
+            }
+            
+            await navigator.clipboard.writeText(textToCopy);
             this.showNotification({
                 message: 'Message copied to clipboard',
                 type: 'success',
@@ -890,6 +1209,9 @@ export class UIManager {
      * Update selected chat UI state
      */
     updateSelectedChat(chatId) {
+        // Update current chat ID
+        this.currentChatId = chatId;
+        
         // Remove previous selection
         const previousSelected = this.elements.chatHistory?.querySelector('.chat-history-item.selected');
         if (previousSelected) {
@@ -909,18 +1231,25 @@ export class UIManager {
     }
 
     /**
-     * Update chat history in sidebar
+     * Update chat history display
      */
     updateChatHistory(chats) {
-        const historyContainer = this.elements.chatHistory;
-        if (!historyContainer) return;
-
-        historyContainer.innerHTML = '';
+        if (!this.elements.chatHistory) return;
         
+        // Store all chats for filtering
+        this.allChats = chats;
+        
+        // Clear existing items
+        this.elements.chatHistory.innerHTML = '';
+        
+        // Add chat items
         chats.forEach(chat => {
             const chatElement = this.createChatHistoryItem(chat);
-            historyContainer.appendChild(chatElement);
+            this.elements.chatHistory.appendChild(chatElement);
         });
+        
+        // Update empty state
+        this.updateEmptyState(chats.length === 0);
     }
 
     /**
@@ -928,23 +1257,82 @@ export class UIManager {
      */
     createChatHistoryItem(chat) {
         const item = document.createElement('div');
-        item.className = 'chat-history-item p-2 rounded-lg hover:bg-chat-hover cursor-pointer transition-colors';
+        item.className = 'chat-history-item group relative p-3 rounded-lg hover:bg-chat-hover cursor-pointer transition-all duration-200 border border-transparent hover:border-chat-border';
         item.dataset.chatId = chat.id;
         
+        // Main content container
+        const content = document.createElement('div');
+        content.className = 'flex items-start space-x-3';
+        
+        // Chat icon
+        const icon = document.createElement('div');
+        icon.className = 'flex-shrink-0 w-8 h-8 bg-chat-primary rounded-lg flex items-center justify-center mt-1';
+        icon.innerHTML = '<i class="fas fa-comment text-sm text-white"></i>';
+        
+        // Text content
+        const textContent = document.createElement('div');
+        textContent.className = 'flex-1 min-w-0';
+        
         const title = document.createElement('div');
-        title.className = 'text-sm font-medium truncate';
+        title.className = 'text-sm font-medium truncate text-chat-text';
         title.textContent = chat.title || 'New Chat';
         
-        const timestamp = document.createElement('div');
-        timestamp.className = 'text-xs text-chat-secondary';
-        timestamp.textContent = new Date(chat.timestamp).toLocaleDateString();
+        const subtitle = document.createElement('div');
+        subtitle.className = 'text-xs text-chat-secondary mt-1';
         
-        item.appendChild(title);
-        item.appendChild(timestamp);
+        // Format timestamp
+        const timestamp = new Date(chat.timestamp);
+        const now = new Date();
+        const diffTime = Math.abs(now - timestamp);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         
+        if (diffDays === 1) {
+            subtitle.textContent = 'Today';
+        } else if (diffDays === 2) {
+            subtitle.textContent = 'Yesterday';
+        } else if (diffDays <= 7) {
+            subtitle.textContent = `${diffDays - 1} days ago`;
+        } else {
+            subtitle.textContent = timestamp.toLocaleDateString();
+        }
+        
+        // Add message count if available
+        if (chat.messageCount > 0) {
+            subtitle.textContent += ` • ${chat.messageCount} messages`;
+        }
+        
+        textContent.appendChild(title);
+        textContent.appendChild(subtitle);
+        
+        // Actions menu (hidden by default, shown on hover)
+        const actionsMenu = document.createElement('div');
+        actionsMenu.className = 'absolute right-2 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200';
+        
+        const menuButton = document.createElement('button');
+        menuButton.className = 'p-1 rounded hover:bg-chat-input transition-colors';
+        menuButton.innerHTML = '<i class="fas fa-ellipsis-v text-xs text-chat-secondary"></i>';
+        menuButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.showChatContextMenu(chat, e);
+        });
+        
+        actionsMenu.appendChild(menuButton);
+        
+        // Assemble the item
+        content.appendChild(icon);
+        content.appendChild(textContent);
+        item.appendChild(content);
+        item.appendChild(actionsMenu);
+        
+        // Click handler
         item.addEventListener('click', () => {
             this.eventBus.emit('chat:select', chat.id);
         });
+        
+        // Add selected state
+        if (this.currentChatId === chat.id) {
+            item.classList.add('bg-chat-hover', 'border-chat-primary');
+        }
         
         return item;
     }
@@ -961,11 +1349,63 @@ export class UIManager {
      * Scroll to bottom of chat
      */
     scrollToBottom() {
-        if (this.autoScroll !== false && this.elements.chatContainer) {
+        if (!this.autoScroll || !this.elements.chatContainer) {
+            return;
+        }
+
+        try {
+            // Use requestAnimationFrame to ensure DOM is updated
+            requestAnimationFrame(() => {
+                const container = this.elements.chatContainer;
+                const scrollHeight = container.scrollHeight;
+                const clientHeight = container.clientHeight;
+                const maxScrollTop = scrollHeight - clientHeight;
+
+                // Only scroll if we're not already at the bottom (within 10px tolerance)
+                const currentScrollTop = container.scrollTop;
+                const isNearBottom = currentScrollTop >= maxScrollTop - 10;
+
+                if (isNearBottom || this.scrollBehavior === 'auto') {
+                    // Use smooth scrolling for better UX
+                    container.scrollTo({
+                        top: maxScrollTop,
+                        behavior: this.scrollBehavior
+                    });
+                } else {
+                    // If user has scrolled up, don't auto-scroll unless it's a new message
+                    // This prevents interrupting user reading
+                    console.log('User has scrolled up, not auto-scrolling');
+                }
+            });
+        } catch (error) {
+            console.warn('Failed to scroll to bottom:', error);
+            // Fallback to immediate scroll
+            try {
+                this.elements.chatContainer.scrollTop = this.elements.chatContainer.scrollHeight;
+            } catch (fallbackError) {
+                console.error('Fallback scroll also failed:', fallbackError);
+            }
+        }
+    }
+
+    /**
+     * Force scroll to bottom (used when new messages are added)
+     */
+    forceScrollToBottom() {
+        if (!this.elements.chatContainer) {
+            return;
+        }
+
+        try {
+            // Force immediate scroll for new messages
             this.elements.chatContainer.scrollTo({
                 top: this.elements.chatContainer.scrollHeight,
                 behavior: 'smooth'
             });
+        } catch (error) {
+            console.warn('Failed to force scroll to bottom:', error);
+            // Fallback
+            this.elements.chatContainer.scrollTop = this.elements.chatContainer.scrollHeight;
         }
     }
 
@@ -1919,41 +2359,55 @@ export class UIManager {
      * Show more options menu
      */
     showMoreOptions() {
-        const moreOptionsHTML = `
+        const optionsHTML = `
             <div class="space-y-4">
                 <h3 class="text-lg font-semibold">More Options</h3>
-                <div class="space-y-2">
+                
+                <div class="grid grid-cols-2 gap-3">
                     <button onclick="window.mcpApp.uiManager.exportCurrentChat()" 
-                            class="w-full p-3 bg-chat-input hover:bg-chat-hover border border-chat-border rounded-lg transition-colors text-left">
-                        <i class="fas fa-download mr-3 text-blue-400"></i>
-                        <span>Export Chat</span>
-                        <div class="text-xs text-chat-secondary ml-6">Download current conversation</div>
+                            class="p-4 bg-chat-input hover:bg-chat-hover border border-chat-border rounded-lg transition-colors text-left">
+                        <i class="fas fa-download text-2xl mb-2 text-blue-400"></i>
+                        <div class="text-sm font-medium">Export Chat</div>
+                        <div class="text-xs text-chat-secondary">Save as JSON</div>
                     </button>
+                    
                     <button onclick="window.mcpApp.uiManager.clearCurrentChat()" 
-                            class="w-full p-3 bg-chat-input hover:bg-chat-hover border border-chat-border rounded-lg transition-colors text-left">
-                        <i class="fas fa-broom mr-3 text-yellow-400"></i>
-                        <span>Clear Chat</span>
-                        <div class="text-xs text-chat-secondary ml-6">Remove all messages</div>
+                            class="p-4 bg-chat-input hover:bg-chat-hover border border-chat-border rounded-lg transition-colors text-left">
+                        <i class="fas fa-trash text-2xl mb-2 text-red-400"></i>
+                        <div class="text-sm font-medium">Clear Chat</div>
+                        <div class="text-xs text-chat-secondary">Remove messages</div>
                     </button>
-                    <button onclick="window.mcpApp.uiManager.toggleFullscreen()" 
-                            class="w-full p-3 bg-chat-input hover:bg-chat-hover border border-chat-border rounded-lg transition-colors text-left">
-                        <i class="fas fa-expand mr-3 text-purple-400"></i>
-                        <span>Toggle Fullscreen</span>
-                        <div class="text-xs text-chat-secondary ml-6">Enter/exit fullscreen mode</div>
-                    </button>
+                    
                     <button onclick="window.mcpApp.uiManager.showKeyboardShortcuts()" 
-                            class="w-full p-3 bg-chat-input hover:bg-chat-hover border border-chat-border rounded-lg transition-colors text-left">
-                        <i class="fas fa-keyboard mr-3 text-green-400"></i>
-                        <span>Keyboard Shortcuts</span>
-                        <div class="text-xs text-chat-secondary ml-6">View available shortcuts</div>
+                            class="p-4 bg-chat-input hover:bg-chat-hover border border-chat-border rounded-lg transition-colors text-left">
+                        <i class="fas fa-keyboard text-2xl mb-2 text-purple-400"></i>
+                        <div class="text-sm font-medium">Shortcuts</div>
+                        <div class="text-xs text-chat-secondary">Keyboard help</div>
+                    </button>
+                    
+                    <button onclick="window.mcpApp.uiManager.toggleFullscreen()" 
+                            class="p-4 bg-chat-input hover:bg-chat-hover border border-chat-border rounded-lg transition-colors text-left">
+                        <i class="fas fa-expand text-2xl mb-2 text-green-400"></i>
+                        <div class="text-sm font-medium">Fullscreen</div>
+                        <div class="text-xs text-chat-secondary">Toggle view</div>
                     </button>
                 </div>
+                
+                <div class="border-t border-chat-border pt-4">
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm">Auto-scroll</span>
+                        <button onclick="window.mcpApp.uiManager.toggleAutoScroll()" 
+                                class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${this.autoScroll ? 'bg-chat-primary' : 'bg-chat-input'}"
+                                id="auto-scroll-toggle">
+                            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${this.autoScroll ? 'translate-x-6' : 'translate-x-1'}"></span>
+                        </button>
+                    </div>
+                </div>
+                
                 <div class="flex justify-end space-x-2 pt-4">
                     <button onclick="window.mcpApp.uiManager.hideModal()" 
                             class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
                         Close
-                    </button>
-                </div>
             </div>
         `;
         
@@ -1978,16 +2432,45 @@ export class UIManager {
      * Clear current chat
      */
     clearCurrentChat() {
-        if (confirm('Are you sure you want to clear all messages in this chat?')) {
-            this.eventBus.emit('chat:clear');
-            this.hideModal();
-            
-            this.showNotification({
-                message: 'Chat cleared successfully',
-                type: 'info',
-                duration: 2000
-            });
+        if (!this.currentChatId) {
+            this.showNotification({ message: 'No active chat to clear', type: 'warning' });
+            return;
         }
+
+        const modalContent = `
+            <div class="space-y-4">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 bg-chat-warning rounded-lg flex items-center justify-center">
+                        <i class="fas fa-exclamation-triangle text-white"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-semibold">Clear Chat</h3>
+                        <p class="text-sm text-chat-secondary">This will remove all messages from the current chat. This action cannot be undone.</p>
+                    </div>
+                </div>
+                <div class="flex justify-end space-x-2">
+                    <button onclick="window.mcpApp.uiManager.hideModal()" 
+                            class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
+                        Cancel
+                    </button>
+                    <button onclick="window.mcpApp.uiManager.confirmClearChat()" 
+                            class="px-4 py-2 bg-chat-warning text-white rounded hover:bg-yellow-600">
+                        Clear Chat
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        this.showModal(modalContent);
+    }
+
+    /**
+     * Confirm clear chat
+     */
+    confirmClearChat() {
+        this.eventBus.emit('chat:clear');
+        this.hideModal();
+        this.showNotification({ message: 'Chat cleared successfully', type: 'success' });
     }
 
     /**
@@ -2015,41 +2498,75 @@ export class UIManager {
     }
 
     /**
-     * Show keyboard shortcuts
+     * Show keyboard shortcuts help
      */
     showKeyboardShortcuts() {
+        const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+        const cmdKey = isMac ? '⌘' : 'Ctrl';
+        
         const shortcutsHTML = `
-            <div class="space-y-4">
+            <div class="space-y-6">
                 <h3 class="text-lg font-semibold">Keyboard Shortcuts</h3>
-                <div class="space-y-3 text-sm">
-                    <div class="flex justify-between items-center">
-                        <span>Send message</span>
-                        <kbd class="px-2 py-1 bg-chat-input rounded text-xs">Enter</kbd>
+                
+                <div class="grid grid-cols-1 gap-4">
+                    <div class="space-y-3">
+                        <h4 class="text-sm font-medium text-chat-secondary uppercase tracking-wide">Conversation Management</h4>
+                        <div class="space-y-2">
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm">New Chat</span>
+                                <kbd class="px-2 py-1 bg-chat-input border border-chat-border rounded text-xs">${cmdKey} + N</kbd>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm">Search Conversations</span>
+                                <kbd class="px-2 py-1 bg-chat-input border border-chat-border rounded text-xs">${cmdKey} + K</kbd>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm">Toggle Sidebar</span>
+                                <kbd class="px-2 py-1 bg-chat-input border border-chat-border rounded text-xs">${cmdKey} + B</kbd>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm">Clear Current Chat</span>
+                                <kbd class="px-2 py-1 bg-chat-input border border-chat-border rounded text-xs">${cmdKey} + Shift + K</kbd>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm">Export Current Chat</span>
+                                <kbd class="px-2 py-1 bg-chat-input border border-chat-border rounded text-xs">${cmdKey} + E</kbd>
+                            </div>
+                        </div>
                     </div>
-                    <div class="flex justify-between items-center">
-                        <span>New line</span>
-                        <kbd class="px-2 py-1 bg-chat-input rounded text-xs">Shift + Enter</kbd>
+                    
+                    <div class="space-y-3">
+                        <h4 class="text-sm font-medium text-chat-secondary uppercase tracking-wide">Navigation</h4>
+                        <div class="space-y-2">
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm">Focus Message Input</span>
+                                <kbd class="px-2 py-1 bg-chat-input border border-chat-border rounded text-xs">${cmdKey} + L</kbd>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm">Close Modal / Clear Search</span>
+                                <kbd class="px-2 py-1 bg-chat-input border border-chat-border rounded text-xs">Esc</kbd>
+                            </div>
+                        </div>
                     </div>
-                    <div class="flex justify-between items-center">
-                        <span>New chat</span>
-                        <kbd class="px-2 py-1 bg-chat-input rounded text-xs">Ctrl + N</kbd>
-                    </div>
-                    <div class="flex justify-between items-center">
-                        <span>Toggle sidebar</span>
-                        <kbd class="px-2 py-1 bg-chat-input rounded text-xs">Ctrl + /</kbd>
-                    </div>
-                    <div class="flex justify-between items-center">
-                        <span>Close modal</span>
-                        <kbd class="px-2 py-1 bg-chat-input rounded text-xs">Escape</kbd>
-                    </div>
-                    <div class="flex justify-between items-center">
-                        <span>Voice input</span>
-                        <kbd class="px-2 py-1 bg-chat-input rounded text-xs">Click mic button</kbd>
+                    
+                    <div class="space-y-3">
+                        <h4 class="text-sm font-medium text-chat-secondary uppercase tracking-wide">Voice & Conversation</h4>
+                        <div class="space-y-2">
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm">Toggle Voice Input</span>
+                                <kbd class="px-2 py-1 bg-chat-input border border-chat-border rounded text-xs">Space</kbd>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm">Toggle Conversation Mode</span>
+                                <kbd class="px-2 py-1 bg-chat-input border border-chat-border rounded text-xs">${cmdKey} + M</kbd>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="flex justify-end space-x-2 pt-4">
+                
+                <div class="flex justify-end pt-4">
                     <button onclick="window.mcpApp.uiManager.hideModal()" 
-                            class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
+                            class="px-4 py-2 bg-chat-primary text-white rounded hover:bg-green-600">
                         Close
                     </button>
                 </div>
@@ -2070,51 +2587,184 @@ export class UIManager {
     /**
      * Handle agent selection change
      */
-    handleAgentChange(agentId) {
-        if (agentId) {
-            this.eventBus.emit('agent:select', agentId);
-        }
+
+
+    /**
+     * Handle model selector change
+     */
+    handleModelChange(modelKey) {
+        if (!modelKey) return;
+        
+        console.log('🎯 Model selected:', modelKey);
+        this.eventBus.emit('model:select', modelKey);
     }
 
     /**
-     * Update agent selector dropdown
+     * Update unified model selector dropdown
      */
-    updateAgentSelector(agents) {
-        if (!this.elements.agentSelector) return;
+    updateModelSelector(models) {
+        if (!this.elements.modelSelector) return;
 
-        this.elements.agentSelector.innerHTML = '';
+        console.log('🔄 Updating unified model selector with', models.length, 'models');
         
-        agents.forEach(agent => {
+        this.elements.modelSelector.innerHTML = '';
+        
+        if (models.length === 0) {
             const option = document.createElement('option');
-            option.value = agent.id;
-            option.textContent = agent.name;
-            option.setAttribute('data-model', agent.config.model);
-            option.setAttribute('data-temp', agent.config.temperature);
-            this.elements.agentSelector.appendChild(option);
+            option.value = '';
+            option.textContent = 'No models available - Configure API keys in settings';
+            option.disabled = true;
+            this.elements.modelSelector.appendChild(option);
+            return;
+        }
+        
+        // Group models by provider
+        const modelsByProvider = {};
+        models.forEach(model => {
+            const provider = model.providerName || model.providerId || 'Unknown';
+            if (!modelsByProvider[provider]) {
+                modelsByProvider[provider] = [];
+            }
+            modelsByProvider[provider].push(model);
+        });
+        
+        // Sort providers (OpenAI first, then DeepSeek, then LM Studio, then others)
+        const providerOrder = ['OpenAI', 'DeepSeek', 'Anthropic', 'Google Gemini', 'LM Studio'];
+        const sortedProviders = Object.keys(modelsByProvider).sort((a, b) => {
+            const indexA = providerOrder.indexOf(a);
+            const indexB = providerOrder.indexOf(b);
+            
+            if (indexA !== -1 && indexB !== -1) {
+                return indexA - indexB;
+            } else if (indexA !== -1) {
+                return -1;
+            } else if (indexB !== -1) {
+                return 1;
+            } else {
+                return a.localeCompare(b);
+            }
+        });
+        
+        // Create options grouped by provider
+        sortedProviders.forEach(provider => {
+            // Create optgroup for each provider
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = `${provider} (${modelsByProvider[provider].length} models)`;
+            
+            // Sort models within provider (prefer newer/better models first)
+            const sortedModels = modelsByProvider[provider].sort((a, b) => {
+                // OpenAI model priority
+                if (a.providerId === 'openai') {
+                    const priority = { 'gpt-4o': 1, 'gpt-4o-mini': 2, 'gpt-4-turbo': 3, 'gpt-4': 4, 'gpt-3.5-turbo': 5 };
+                    return (priority[a.id] || 99) - (priority[b.id] || 99);
+                }
+                // DeepSeek model priority
+                if (a.providerId === 'deepseek') {
+                    const priority = { 'deepseek-chat': 1, 'deepseek-reasoner': 2 };
+                    return (priority[a.id] || 99) - (priority[b.id] || 99);
+                }
+                // Gemini model priority
+                if (a.providerId === 'gemini') {
+                    const priority = { 'gemini-1.5-flash': 1, 'gemini-1.5-flash-exp': 2, 'gemini-1.5-pro': 3, 'gemini-1.5-pro-exp': 4 };
+                    return (priority[a.id] || 99) - (priority[b.id] || 99);
+                }
+                // Default alphabetical
+                return a.id.localeCompare(b.id);
+            });
+            
+            sortedModels.forEach(model => {
+                const option = document.createElement('option');
+                option.value = `${model.providerId}:${model.id}`;
+                
+                // Show model name with capabilities info
+                let displayName = model.id;
+                if (model.capabilities) {
+                    const caps = [];
+                    if (model.capabilities.streaming) caps.push('Stream');
+                    if (model.capabilities.functionCalling) caps.push('Functions');
+                    if (model.capabilities.vision) caps.push('Vision');
+                    if (model.capabilities.reasoning) caps.push('Reasoning');
+                    
+                    if (caps.length > 0) {
+                        displayName += ` (${caps.join(', ')})`;
+                    }
+                }
+                
+                option.textContent = displayName;
+                option.setAttribute('data-provider', model.providerId);
+                option.setAttribute('data-model', model.id);
+                option.setAttribute('data-provider-name', model.providerName);
+                
+                optgroup.appendChild(option);
+            });
+            
+            this.elements.modelSelector.appendChild(optgroup);
         });
 
-        // Select the first agent by default
-        if (agents.length > 0) {
-            this.elements.agentSelector.value = agents[0].id;
-            this.updateCurrentAgentInfo(agents[0]);
+        // Select the first model by default if none is selected
+        if (models.length > 0 && !this.elements.modelSelector.value) {
+            const firstModel = models[0];
+            this.elements.modelSelector.value = `${firstModel.providerId}:${firstModel.id}`;
+            // Trigger the selection
+            this.handleModelChange(`${firstModel.providerId}:${firstModel.id}`);
         }
     }
 
     /**
-     * Update current agent information display
+     * Update current model information display
      */
-    updateCurrentAgentInfo(agent) {
-        if (this.elements.currentModel) {
-            this.elements.currentModel.textContent = `Model: ${agent.config.model}`;
-        }
-        if (this.elements.modelTemp) {
-            this.elements.modelTemp.textContent = `Temp: ${agent.config.temperature}`;
+    updateCurrentModelInfo(data) {
+        if (!data || !data.model) {
+            console.warn('Cannot update model info - invalid data:', data);
+            return;
         }
         
-        // Update agent selector if not already selected
-        if (this.elements.agentSelector && this.elements.agentSelector.value !== agent.id) {
-            this.elements.agentSelector.value = agent.id;
+        const { model, providerName } = data;
+        
+        if (this.elements.currentModel) {
+            this.elements.currentModel.textContent = `${model.id} (${providerName})`;
         }
+        
+        // Update temperature display if available
+        if (this.elements.modelTemp && model.defaultTemperature !== undefined) {
+            this.elements.modelTemp.textContent = `Temp: ${model.defaultTemperature}`;
+        }
+        
+        // Update model selector if not already selected
+        const modelKey = `${model.providerId}:${model.id}`;
+        if (this.elements.modelSelector && this.elements.modelSelector.value !== modelKey) {
+            this.elements.modelSelector.value = modelKey;
+        }
+    }
+
+    /**
+     * Update agent status based on selected model
+     */
+    updateAgentStatus(data) {
+        if (!data || !data.model || !this.elements.agentStatus) {
+            return;
+        }
+        
+        const { model, providerName } = data;
+        
+        // Determine status indicator color based on provider
+        let statusColor = 'bg-green-500'; // Default green
+        if (model.providerId === 'openai') {
+            statusColor = 'bg-blue-500';
+        } else if (model.providerId === 'deepseek') {
+            statusColor = 'bg-purple-500';
+        } else if (model.providerId === 'lmstudio') {
+            statusColor = 'bg-green-500';
+        } else if (model.providerId === 'gemini') {
+            statusColor = 'bg-blue-600';
+        } else if (model.providerId === 'anthropic') {
+            statusColor = 'bg-orange-500';
+        }
+        
+        this.elements.agentStatus.innerHTML = `
+            <span class="w-2 h-2 ${statusColor} rounded-full mr-2"></span>
+            ${providerName} Ready
+        `;
     }
 
     /**
@@ -2157,9 +2807,33 @@ export class UIManager {
 
     /**
      * Show settings modal
+     * Refactored: Anthropic model dropdown is now populated dynamically from provider.
      */
-    showSettings() {
+    async showSettings() {
         const currentSettings = this.loadSettings();
+        // Fetch Anthropic models dynamically
+        let anthropicModels = [];
+        try {
+            const manager = window.mcpApp?.mcpAgentManager;
+            if (manager) {
+                const instance = manager.registry.getProviderInstance('anthropic');
+                if (instance && typeof instance.getModels === 'function') {
+                    anthropicModels = await instance.getModels();
+                }
+            }
+        } catch (err) {
+            console.warn('Failed to fetch Anthropic models:', err.message);
+        }
+        if (!Array.isArray(anthropicModels) || anthropicModels.length === 0) {
+            anthropicModels = [{ id: 'claude-3-5-sonnet-20241022', display_name: 'Claude 3.5 Sonnet (Fallback)' }];
+        }
+        // Build Anthropic model options
+        const anthropicModelOptions = anthropicModels.map(model => {
+            const id = model.id || model;
+            const name = model.display_name || id;
+            const selected = (currentSettings.anthropic?.defaultModel || 'claude-3-5-sonnet-20241022') === id ? 'selected' : '';
+            return `<option value="${id}" ${selected}>${name}</option>`;
+        }).join('');
         const settingsHTML = `
             <div class="max-w-4xl max-h-[80vh] overflow-y-auto">
                 <div class="space-y-4">
@@ -2211,10 +2885,10 @@ export class UIManager {
                                 <label class="block">
                                     <span class="text-sm text-chat-secondary">API Key</span>
                                     <input type="password" id="deepseek-api-key" value="${currentSettings.deepseek?.apiKey || ''}"
-                                           placeholder="sk-..."
+                                           placeholder="sk-abcd1234efgh5678... (starts with sk-)"
                                            class="w-full p-2 bg-chat-input rounded-lg border border-chat-border text-sm">
                                     <div class="text-xs text-chat-secondary mt-1">
-                                        Get your API key from <a href="https://deepseek.com/" target="_blank" class="text-blue-400 hover:underline">DeepSeek Platform</a>
+                                        Get your API key from <a href="https://platform.deepseek.com/api_keys" target="_blank" class="text-blue-400 hover:underline">DeepSeek Platform</a>
                                     </div>
                                 </label>
                                 <label class="block">
@@ -2264,6 +2938,76 @@ export class UIManager {
                                 </label>
                                 <button onclick="window.mcpApp.uiManager.testOpenAIConnection()" 
                                         class="w-full px-3 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700">
+                                    <i class="fas fa-plug mr-1"></i> Test Connection
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Anthropic Claude Settings -->
+                        <div class="border border-chat-border rounded-lg p-4">
+                            <h4 class="text-md font-medium mb-3 flex items-center">
+                                <i class="fas fa-robot mr-2"></i> Anthropic Claude Configuration
+                            </h4>
+                            <div class="space-y-3">
+                                <label class="block">
+                                    <span class="text-sm text-chat-secondary">API Key</span>
+                                    <input type="password" id="anthropic-api-key" value="${currentSettings.anthropic?.apiKey || ''}" 
+                                           placeholder="sk-ant-..."
+                                           class="w-full p-2 bg-chat-input rounded-lg border border-chat-border text-sm">
+                                    <div class="text-xs text-chat-secondary mt-1">
+                                        Get your API key from <a href="https://console.anthropic.com/account/keys" target="_blank" class="text-blue-400 hover:underline">Anthropic Console</a>
+                                    </div>
+                                </label>
+                                <label class="block">
+                                    <span class="text-sm text-chat-secondary">Default Model</span>
+                                    <select id="anthropic-default-model" class="w-full p-2 bg-chat-input rounded-lg border border-chat-border text-sm">
+                                        ${anthropicModelOptions}
+                                    </select>
+                                </label>
+                                <label class="block">
+                                    <span class="text-sm text-chat-secondary">Anthropic Version (Optional)</span>
+                                    <input type="text" id="anthropic-version" value="${currentSettings.anthropic?.anthropicVersion || '2023-06-01'}" 
+                                           placeholder="2023-06-01"
+                                           class="w-full p-2 bg-chat-input rounded-lg border border-chat-border text-sm">
+                                    <div class="text-xs text-chat-secondary mt-1">
+                                        API version for compatibility (default: 2023-06-01)
+                                    </div>
+                                </label>
+                                <button onclick="window.mcpApp.uiManager.testAnthropicConnection()" 
+                                        class="w-full px-3 py-2 bg-orange-600 text-white rounded text-sm hover:bg-orange-700">
+                                    <i class="fas fa-plug mr-1"></i> Test Connection
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Google Gemini Settings -->
+                        <div class="border border-chat-border rounded-lg p-4">
+                            <h4 class="text-md font-medium mb-3 flex items-center">
+                                <i class="fab fa-google mr-2"></i> Google Gemini Configuration
+                            </h4>
+                            <div class="space-y-3">
+                                <label class="block">
+                                    <span class="text-sm text-chat-secondary">API Key</span>
+                                    <input type="password" id="gemini-api-key" value="${currentSettings.gemini?.apiKey || ''}" 
+                                           placeholder="AIza..."
+                                           class="w-full p-2 bg-chat-input rounded-lg border border-chat-border text-sm">
+                                    <div class="text-xs text-chat-secondary mt-1">
+                                        Get your API key from <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-400 hover:underline">Google AI Studio</a>
+                                    </div>
+                                </label>
+                                <label class="block">
+                                    <span class="text-sm text-chat-secondary">Default Model</span>
+                                    <select id="gemini-default-model" class="w-full p-2 bg-chat-input rounded-lg border border-chat-border text-sm">
+                                        <option value="gemini-1.5-flash" ${(currentSettings.gemini?.defaultModel || 'gemini-1.5-flash') === 'gemini-1.5-flash' ? 'selected' : ''}>Gemini 1.5 Flash (Recommended)</option>
+                                        <option value="gemini-1.5-pro" ${(currentSettings.gemini?.defaultModel === 'gemini-1.5-pro') ? 'selected' : ''}>Gemini 1.5 Pro</option>
+                                        <option value="gemini-1.5-flash-exp" ${(currentSettings.gemini?.defaultModel === 'gemini-1.5-flash-exp') ? 'selected' : ''}>Gemini 1.5 Flash Experimental</option>
+                                        <option value="gemini-1.5-pro-exp" ${(currentSettings.gemini?.defaultModel === 'gemini-1.5-pro-exp') ? 'selected' : ''}>Gemini 1.5 Pro Experimental</option>
+                                        <option value="gemini-1.0-pro" ${(currentSettings.gemini?.defaultModel === 'gemini-1.0-pro') ? 'selected' : ''}>Gemini 1.0 Pro</option>
+                                        <option value="gemini-1.0-pro-vision" ${(currentSettings.gemini?.defaultModel === 'gemini-1.0-pro-vision') ? 'selected' : ''}>Gemini 1.0 Pro Vision</option>
+                                    </select>
+                                </label>
+                                <button onclick="window.mcpApp.uiManager.testGeminiConnection()" 
+                                        class="w-full px-3 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
                                     <i class="fas fa-plug mr-1"></i> Test Connection
                                 </button>
                             </div>
@@ -3116,11 +3860,13 @@ export class UIManager {
             return;
         }
 
-        if (apiKey.length < 10) {
+        // Validate DeepSeek API key format
+        const deepseekKeyPattern = /^sk-[a-f0-9]{32,}$/i;
+        if (!deepseekKeyPattern.test(apiKey)) {
             this.showNotification({
-                message: '❌ Invalid API key format. Please check your DeepSeek API key.',
+                message: '❌ Invalid DeepSeek API key format. Key must start with "sk-" followed by a hexadecimal string (e.g., sk-abcd1234...). Get your key at https://platform.deepseek.com/api_keys',
                 type: 'error',
-                duration: 3000
+                duration: 8000
             });
             return;
         }
@@ -3151,9 +3897,9 @@ export class UIManager {
                 });
             } else if (response.status === 401) {
                 this.showNotification({
-                    message: '❌ Invalid API key. Please check your DeepSeek API key.',
+                    message: '❌ Authentication failed. API key is invalid or expired. Please get a new key from https://platform.deepseek.com/api_keys',
                     type: 'error',
-                    duration: 5000
+                    duration: 8000
                 });
             } else if (response.status === 429) {
                 this.showNotification({
@@ -3181,6 +3927,167 @@ export class UIManager {
         }
     }
 
+    async testAnthropicConnection() {
+        const apiKey = document.getElementById('anthropic-api-key')?.value?.trim();
+        
+        if (!apiKey) {
+            this.showNotification({
+                type: 'error',
+                message: 'Please enter your Anthropic API key first'
+            });
+            return;
+        }
+
+        try {
+            // Show loading state
+            const testButton = document.querySelector('button[onclick*="testAnthropicConnection"]');
+            if (testButton) {
+                testButton.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Testing...';
+                testButton.disabled = true;
+            }
+
+            // Test configuration first
+            const result = await window.mcpApp.mcpAgentManager.configureAnthropic({
+                apiKey,
+                defaultModel: document.getElementById('anthropic-default-model')?.value || 'claude-3-5-sonnet-20241022',
+                anthropicVersion: document.getElementById('anthropic-version')?.value || '2023-06-01'
+            });
+
+            if (result.success) {
+                // Test connection
+                const anthropicInstance = window.mcpApp.mcpAgentManager.registry.getProviderInstance('anthropic');
+                if (anthropicInstance) {
+                    const connectionTest = await anthropicInstance.testConnection();
+                    
+                    if (connectionTest.success) {
+                        this.showNotification({
+                            type: 'success',
+                            title: 'Anthropic Connection Successful',
+                            message: `Connected to ${connectionTest.model || 'Claude'}. Response: "${connectionTest.response}"`
+                        });
+                        
+                        // Update models list
+                        await window.mcpApp.mcpAgentManager.triggerModelRefresh();
+                    } else {
+                        throw new Error(connectionTest.error || 'Connection test failed');
+                    }
+                } else {
+                    throw new Error('Failed to initialize Anthropic client');
+                }
+            } else {
+                throw new Error(result.error || 'Configuration failed');
+            }
+        } catch (error) {
+            console.error('Anthropic connection test failed:', error);
+            
+            let errorMessage = 'Failed to connect to Anthropic API';
+            if (error.message.includes('401') || error.message.includes('authentication')) {
+                errorMessage = 'Invalid API key. Please check your Anthropic API key.';
+            } else if (error.message.includes('403')) {
+                errorMessage = 'API key does not have permission. Please check your Anthropic account.';
+            } else if (error.message.includes('429')) {
+                errorMessage = 'Rate limit exceeded. Please try again later.';
+            } else if (error.message.includes('network') || error.message.includes('fetch')) {
+                errorMessage = 'Network error. Please check your internet connection.';
+            } else if (error.message) {
+                errorMessage = error.message;
+            }
+            
+            this.showNotification({
+                type: 'error',
+                title: 'Anthropic Connection Failed',
+                message: errorMessage
+            });
+        } finally {
+            // Reset button state
+            const testButton = document.querySelector('button[onclick*="testAnthropicConnection"]');
+            if (testButton) {
+                testButton.innerHTML = '<i class="fas fa-plug mr-1"></i> Test Connection';
+                testButton.disabled = false;
+            }
+        }
+    }
+
+    async testGeminiConnection() {
+        const apiKey = document.getElementById('gemini-api-key')?.value?.trim();
+        
+        if (!apiKey) {
+            this.showNotification({
+                type: 'error',
+                message: 'Please enter your Gemini API key first'
+            });
+            return;
+        }
+
+        try {
+            // Show loading state
+            const testButton = document.querySelector('button[onclick*="testGeminiConnection"]');
+            if (testButton) {
+                testButton.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Testing...';
+                testButton.disabled = true;
+            }
+
+            // Test configuration first
+            const result = await window.mcpApp.mcpAgentManager.configureGemini({
+                apiKey,
+                defaultModel: document.getElementById('gemini-default-model')?.value || 'gemini-1.5-flash'
+            });
+
+            if (result.success) {
+                // Test connection
+                const geminiInstance = window.mcpApp.mcpAgentManager.registry.getProviderInstance('gemini');
+                if (geminiInstance) {
+                    const connectionTest = await geminiInstance.testConnection();
+                    
+                    if (connectionTest.success) {
+                        this.showNotification({
+                            type: 'success',
+                            title: 'Gemini Connection Successful',
+                            message: `Connected to Gemini API. Found ${connectionTest.models?.length || 0} models.`
+                        });
+                        
+                        // Update models list
+                        await window.mcpApp.mcpAgentManager.refreshAvailableModels();
+                    } else {
+                        throw new Error(connectionTest.error || 'Connection test failed');
+                    }
+                } else {
+                    throw new Error('Failed to initialize Gemini client');
+                }
+            } else {
+                throw new Error(result.error || 'Configuration failed');
+            }
+        } catch (error) {
+            console.error('Gemini connection test failed:', error);
+            
+            let errorMessage = 'Failed to connect to Gemini API';
+            if (error.message.includes('401') || error.message.includes('authentication')) {
+                errorMessage = 'Invalid API key. Please check your Gemini API key.';
+            } else if (error.message.includes('403')) {
+                errorMessage = 'API key does not have permission. Please check your Google AI Studio account.';
+            } else if (error.message.includes('429')) {
+                errorMessage = 'Rate limit exceeded. Please try again later.';
+            } else if (error.message.includes('network') || error.message.includes('fetch')) {
+                errorMessage = 'Network error. Please check your internet connection.';
+            } else if (error.message) {
+                errorMessage = error.message;
+            }
+            
+            this.showNotification({
+                type: 'error',
+                title: 'Gemini Connection Failed',
+                message: errorMessage
+            });
+        } finally {
+            // Reset button state
+            const testButton = document.querySelector('button[onclick*="testGeminiConnection"]');
+            if (testButton) {
+                testButton.innerHTML = '<i class="fas fa-plug mr-1"></i> Test Connection';
+                testButton.disabled = false;
+            }
+        }
+    }
+
     /**
      * Save settings
      */
@@ -3199,6 +4106,15 @@ export class UIManager {
                 apiKey: document.getElementById('openai-api-key')?.value,
                 defaultModel: document.getElementById('openai-default-model')?.value,
                 organization: document.getElementById('openai-organization')?.value
+            },
+            anthropic: {
+                apiKey: document.getElementById('anthropic-api-key')?.value,
+                defaultModel: document.getElementById('anthropic-default-model')?.value,
+                anthropicVersion: document.getElementById('anthropic-version')?.value
+            },
+            gemini: {
+                apiKey: document.getElementById('gemini-api-key')?.value,
+                defaultModel: document.getElementById('gemini-default-model')?.value
             },
             app: {
                 theme: document.getElementById('app-theme')?.value,
@@ -3228,7 +4144,7 @@ export class UIManager {
 
         // Apply LM Studio settings
         if (settings.lmStudio.url && settings.lmStudio.model) {
-            this.eventBus.emit('agent:configure', 'lm-studio', {
+            this.eventBus.emit('agent:configure:lmstudio', {
                 baseUrl: settings.lmStudio.url,
                 defaultModel: settings.lmStudio.model
             });
@@ -3253,10 +4169,31 @@ export class UIManager {
             });
         }
 
+        // Apply Anthropic settings
+        if (settings.anthropic.apiKey) {
+            this.eventBus.emit('agent:configure:anthropic', {
+                apiKey: settings.anthropic.apiKey,
+                defaultModel: settings.anthropic.defaultModel,
+                anthropicVersion: settings.anthropic.anthropicVersion
+            });
+        }
+
+        // Apply Gemini settings
+        if (settings.gemini.apiKey) {
+            this.eventBus.emit('agent:configure:gemini', {
+                apiKey: settings.gemini.apiKey,
+                defaultModel: settings.gemini.defaultModel
+            });
+        }
+
         // Apply app settings
         this.applyAppSettings(settings.app);
         this.applyVoiceSettings(settings.voice);
         this.applyLanguageSettings(settings.language);
+        
+        // Trigger model refresh after settings are saved
+        console.log('🔄 Triggering model refresh after settings save...');
+        this.eventBus.emit('agent:refresh:models');
         
         this.showNotification({
             message: 'Settings saved successfully',
@@ -3296,6 +4233,15 @@ export class UIManager {
                 apiKey: '',
                 defaultModel: 'gpt-4o-mini',
                 organization: ''
+            },
+            anthropic: {
+                apiKey: '',
+                defaultModel: 'claude-3-5-sonnet-20241022',
+                anthropicVersion: '2023-06-01'
+            },
+            gemini: {
+                apiKey: '',
+                defaultModel: 'gemini-1.5-flash'
             },
             app: {
                 theme: 'dark',
@@ -3379,6 +4325,62 @@ export class UIManager {
         });
     }
 
+    /**
+     * Apply provider configurations from saved settings
+     */
+    applyProviderConfigurations(settings) {
+        if (!settings) return;
+        
+        console.log('🔧 Applying provider configurations from saved settings');
+        
+        // Apply LM Studio settings
+        if (settings.lmStudio?.url && settings.lmStudio?.model) {
+            console.log('🔧 Configuring LM Studio from saved settings');
+            this.eventBus.emit('agent:configure:lmstudio', {
+                baseUrl: settings.lmStudio.url,
+                defaultModel: settings.lmStudio.model
+            });
+        }
+
+        // Apply DeepSeek settings
+        if (settings.deepseek?.apiKey) {
+            console.log('🔧 Configuring DeepSeek from saved settings');
+            this.eventBus.emit('agent:configure:deepseek', {
+                apiKey: settings.deepseek.apiKey,
+                defaultModel: settings.deepseek.defaultModel
+            });
+        }
+
+        // Apply OpenAI settings
+        if (settings.openai?.apiKey) {
+            console.log('🔧 Configuring OpenAI from saved settings');
+            this.eventBus.emit('agent:configure:openai', {
+                apiKey: settings.openai.apiKey,
+                defaultModel: settings.openai.defaultModel,
+                organization: settings.openai.organization
+            });
+        }
+
+        // Apply Anthropic settings
+        if (settings.anthropic?.apiKey) {
+            console.log('🔧 Configuring Anthropic from saved settings');
+            this.eventBus.emit('agent:configure:anthropic', {
+                apiKey: settings.anthropic.apiKey,
+                defaultModel: settings.anthropic.defaultModel,
+                anthropicVersion: settings.anthropic.anthropicVersion
+            });
+        }
+
+        // Apply Gemini settings
+        if (settings.gemini?.apiKey) {
+            console.log('🔧 Configuring Gemini from saved settings');
+            this.eventBus.emit('agent:configure:gemini', {
+                apiKey: settings.gemini.apiKey,
+                defaultModel: settings.gemini.defaultModel
+            });
+        }
+    }
+
     // Animation helpers
     animateMessageIn(element) {
         element.style.opacity = '0';
@@ -3417,9 +4419,44 @@ export class UIManager {
     handleResize() {
         const isMobile = window.innerWidth < 768;
         
+        // Prevent horizontal overflow
+        document.body.style.maxWidth = '100vw';
+        document.body.style.overflowX = 'hidden';
+        
+        // Ensure app container doesn't expand beyond viewport
+        const app = document.getElementById('app');
+        if (app) {
+            app.style.maxWidth = '100vw';
+            app.style.overflowX = 'hidden';
+        }
+        
+        // Ensure chat container doesn't expand beyond viewport
+        const chatContainer = document.getElementById('chat-container');
+        if (chatContainer) {
+            chatContainer.style.maxWidth = '100%';
+            chatContainer.style.overflowX = 'hidden';
+        }
+        
+        // Ensure chat messages don't expand beyond container
+        const chatMessages = document.getElementById('chat-messages');
+        if (chatMessages) {
+            chatMessages.style.maxWidth = '100%';
+            chatMessages.style.overflowX = 'hidden';
+        }
+        
         if (isMobile && !this.sidebarCollapsed) {
             this.toggleSidebar();
         }
+        
+        // Force word wrapping on all message content
+        const messageElements = document.querySelectorAll('.message .prose');
+        messageElements.forEach(element => {
+            element.style.wordWrap = 'break-word';
+            element.style.wordBreak = 'break-word';
+            element.style.overflowWrap = 'break-word';
+            element.style.maxWidth = '100%';
+            element.style.overflowX = 'hidden';
+        });
     }
 
     cleanup() {
@@ -3474,6 +4511,10 @@ export class UIManager {
     selectSpeechLanguage(langCode) {
         console.log(`🌍 Quick language selection: ${langCode}`);
         
+        // Update both input and output language settings
+        this.languageSettings.speechInputLanguage = langCode;
+        this.languageSettings.speechOutputLanguage = langCode; // Also update output language for voice selection
+        
         // Update the language setting
         this.updateSpeechRecognitionLanguage(langCode);
         
@@ -3493,6 +4534,39 @@ export class UIManager {
             type: 'success',
             duration: 2000
         });
+        
+        // Save only language settings to avoid overwriting API keys
+        this.saveLanguageSettingsOnly();
+        
+        // Log the change for debugging
+        console.log('🎤 Language settings updated:', {
+            inputLanguage: this.languageSettings.speechInputLanguage,
+            outputLanguage: this.languageSettings.speechOutputLanguage
+        });
+    }
+
+    /**
+     * Save only language settings without affecting other settings
+     */
+    saveLanguageSettingsOnly() {
+        try {
+            // Load existing settings first
+            const existingSettings = JSON.parse(localStorage.getItem('mcp-tabajara-settings') || '{}');
+            
+            // Update only the language section
+            existingSettings.language = {
+                speechInputLanguage: this.languageSettings.speechInputLanguage,
+                speechOutputLanguage: this.languageSettings.speechOutputLanguage,
+                preferredVoice: this.languageSettings.preferredVoice
+            };
+            
+            // Save back to localStorage
+            localStorage.setItem('mcp-tabajara-settings', JSON.stringify(existingSettings));
+            
+            console.log('✅ Language settings saved without affecting other settings');
+        } catch (error) {
+            console.error('Failed to save language settings:', error);
+        }
     }
 
     /**
@@ -3598,5 +4672,731 @@ export class UIManager {
             });
 
         console.log(`🎤 Populated voice selector with ${allVoices.length} voices`);
+    }
+
+    /**
+     * Toggle auto-scroll behavior
+     */
+    toggleAutoScroll() {
+        this.autoScroll = !this.autoScroll;
+        
+        // Show notification about auto-scroll state
+        this.showNotification({
+            message: `Auto-scroll ${this.autoScroll ? 'enabled' : 'disabled'}`,
+            type: this.autoScroll ? 'success' : 'info',
+            duration: 2000
+        });
+        
+        // If auto-scroll is enabled and we're not at the bottom, scroll to bottom
+        if (this.autoScroll) {
+            this.forceScrollToBottom();
+        }
+        
+        // Close modal if it's open
+        this.hideModal();
+        
+        console.log(`Auto-scroll ${this.autoScroll ? 'enabled' : 'disabled'}`);
+    }
+
+    /**
+     * Check if user is near the bottom of the chat
+     */
+    isNearBottom() {
+        if (!this.elements.chatContainer) {
+            return true;
+        }
+        
+        const container = this.elements.chatContainer;
+        const scrollHeight = container.scrollHeight;
+        const clientHeight = container.clientHeight;
+        const maxScrollTop = scrollHeight - clientHeight;
+        const currentScrollTop = container.scrollTop;
+        
+        // Consider "near bottom" if within 50px of the bottom
+        return currentScrollTop >= maxScrollTop - 50;
+    }
+
+    /**
+     * Show scroll to bottom button when user has scrolled up
+     */
+    showScrollToBottomButton() {
+        if (!this.isNearBottom()) {
+            // Create or show scroll to bottom button
+            let scrollButton = document.getElementById('scroll-to-bottom-btn');
+            if (!scrollButton) {
+                scrollButton = document.createElement('button');
+                scrollButton.id = 'scroll-to-bottom-btn';
+                scrollButton.className = 'fixed bottom-20 right-6 bg-chat-primary text-white p-3 rounded-full shadow-lg hover:bg-green-600 transition-colors z-40';
+                scrollButton.innerHTML = '<i class="fas fa-chevron-down"></i>';
+                scrollButton.title = 'Scroll to bottom';
+                scrollButton.onclick = () => {
+                    this.forceScrollToBottom();
+                    this.hideScrollToBottomButton();
+                };
+                document.body.appendChild(scrollButton);
+            }
+            scrollButton.style.display = 'block';
+        }
+    }
+
+    /**
+     * Hide scroll to bottom button
+     */
+    hideScrollToBottomButton() {
+        const scrollButton = document.getElementById('scroll-to-bottom-btn');
+        if (scrollButton) {
+            scrollButton.style.display = 'none';
+        }
+    }
+
+    /**
+     * Show chat context menu
+     */
+    showChatContextMenu(chat, event) {
+        // Remove any existing context menus
+        const existingMenus = document.querySelectorAll('.chat-context-menu');
+        existingMenus.forEach(menu => menu.remove());
+        
+        const menu = document.createElement('div');
+        menu.className = 'chat-context-menu fixed bg-chat-light border border-chat-border rounded-lg shadow-lg z-50 py-1 min-w-48';
+        menu.style.left = `${event.clientX}px`;
+        menu.style.top = `${event.clientY}px`;
+        
+        const menuItems = [
+            {
+                icon: 'fas fa-edit',
+                label: 'Rename',
+                action: () => this.renameChat(chat)
+            },
+            {
+                icon: 'fas fa-download',
+                label: 'Export',
+                action: () => this.exportChat(chat.id)
+            },
+            {
+                icon: 'fas fa-archive',
+                label: 'Archive',
+                action: () => this.archiveChat(chat.id)
+            },
+            {
+                icon: 'fas fa-trash',
+                label: 'Delete',
+                action: () => this.deleteChat(chat.id),
+                danger: true
+            }
+        ];
+        
+        menuItems.forEach(item => {
+            const menuItem = document.createElement('div');
+            menuItem.className = `flex items-center space-x-3 px-4 py-2 hover:bg-chat-hover cursor-pointer transition-colors ${item.danger ? 'text-chat-error hover:text-red-400' : 'text-chat-text'}`;
+            
+            menuItem.innerHTML = `
+                <i class="${item.icon} text-sm w-4"></i>
+                <span class="text-sm">${item.label}</span>
+            `;
+            
+            menuItem.addEventListener('click', () => {
+                item.action();
+                menu.remove();
+            });
+            
+            menu.appendChild(menuItem);
+        });
+        
+        document.body.appendChild(menu);
+        
+        // Close menu when clicking outside
+        const closeMenu = (e) => {
+            if (!menu.contains(e.target)) {
+                menu.remove();
+                document.removeEventListener('click', closeMenu);
+            }
+        };
+        
+        // Delay to prevent immediate closure
+        setTimeout(() => {
+            document.addEventListener('click', closeMenu);
+        }, 100);
+    }
+
+    /**
+     * Rename chat
+     */
+    renameChat(chat) {
+        const modalContent = `
+            <div class="space-y-4">
+                <h3 class="text-lg font-semibold">Rename Chat</h3>
+                <div>
+                    <label class="block text-sm font-medium mb-2">Chat Title</label>
+                    <input type="text" id="chat-title-input" 
+                           value="${chat.title || 'New Chat'}" 
+                           class="w-full bg-chat-input border border-chat-border rounded-lg px-3 py-2 text-chat-text focus:outline-none focus:ring-2 focus:ring-chat-primary"
+                           placeholder="Enter chat title">
+                </div>
+                <div class="flex justify-end space-x-2">
+                    <button onclick="window.mcpApp.uiManager.hideModal()" 
+                            class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
+                        Cancel
+                    </button>
+                    <button onclick="window.mcpApp.uiManager.saveChatTitle('${chat.id}')" 
+                            class="px-4 py-2 bg-chat-primary text-white rounded hover:bg-green-600">
+                        Save
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        this.showModal(modalContent);
+        
+        // Focus the input
+        setTimeout(() => {
+            const input = document.getElementById('chat-title-input');
+            if (input) {
+                input.focus();
+                input.select();
+            }
+        }, 100);
+    }
+
+    /**
+     * Save chat title
+     */
+    saveChatTitle(chatId) {
+        const input = document.getElementById('chat-title-input');
+        const newTitle = input?.value?.trim();
+        
+        if (newTitle) {
+            this.eventBus.emit('chat:rename', chatId, newTitle);
+        }
+        
+        this.hideModal();
+    }
+
+    /**
+     * Export chat
+     */
+    exportChat(chatId) {
+        this.eventBus.emit('chat:export', chatId);
+    }
+
+    /**
+     * Archive chat
+     */
+    archiveChat(chatId) {
+        // This would be implemented in ChatManager
+        this.eventBus.emit('chat:archive', chatId);
+    }
+
+    /**
+     * Delete chat with confirmation
+     */
+    deleteChat(chatId) {
+        const modalContent = `
+            <div class="space-y-4">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 bg-chat-error rounded-lg flex items-center justify-center">
+                        <i class="fas fa-exclamation-triangle text-white"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-semibold">Delete Chat</h3>
+                        <p class="text-sm text-chat-secondary">This action cannot be undone.</p>
+                    </div>
+                </div>
+                <div class="flex justify-end space-x-2">
+                    <button onclick="window.mcpApp.uiManager.hideModal()" 
+                            class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
+                        Cancel
+                    </button>
+                    <button onclick="window.mcpApp.uiManager.confirmDeleteChat('${chatId}')" 
+                            class="px-4 py-2 bg-chat-error text-white rounded hover:bg-red-600">
+                        Delete
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        this.showModal(modalContent);
+    }
+
+    /**
+     * Confirm delete chat
+     */
+    confirmDeleteChat(chatId) {
+        this.eventBus.emit('chat:delete', chatId);
+        this.hideModal();
+    }
+
+    /**
+     * Handle chat search
+     */
+    handleChatSearch(query) {
+        this.currentSearchQuery = query.toLowerCase().trim();
+        this.filterChats();
+    }
+
+    /**
+     * Set active filter
+     */
+    setActiveFilter(filter) {
+        this.currentFilter = filter;
+        
+        // Update filter button states
+        const filterButtons = [this.elements.filterAll, this.elements.filterRecent, this.elements.filterArchived];
+        filterButtons.forEach((btn, index) => {
+            if (btn) {
+                const filters = ['all', 'recent', 'archived'];
+                if (filters[index] === filter) {
+                    btn.className = 'filter-btn active px-3 py-1 text-xs rounded-full bg-chat-primary text-white';
+                } else {
+                    btn.className = 'filter-btn px-3 py-1 text-xs rounded-full bg-chat-input text-chat-secondary hover:bg-chat-hover';
+                }
+            }
+        });
+        
+        this.filterChats();
+    }
+
+    /**
+     * Filter chats based on search query and active filter
+     */
+    filterChats() {
+        if (!this.allChats) return;
+        
+        let filteredChats = [...this.allChats];
+        
+        // Apply search filter
+        if (this.currentSearchQuery) {
+            filteredChats = filteredChats.filter(chat => 
+                chat.title?.toLowerCase().includes(this.currentSearchQuery) ||
+                chat.metadata?.tags?.some(tag => tag.toLowerCase().includes(this.currentSearchQuery))
+            );
+        }
+        
+        // Apply category filter
+        switch (this.currentFilter) {
+            case 'recent':
+                const oneWeekAgo = new Date();
+                oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+                filteredChats = filteredChats.filter(chat => 
+                    new Date(chat.timestamp) > oneWeekAgo
+                );
+                break;
+            case 'archived':
+                filteredChats = filteredChats.filter(chat => 
+                    chat.metadata?.archived === true
+                );
+                break;
+            case 'all':
+            default:
+                // Show all non-archived chats
+                filteredChats = filteredChats.filter(chat => 
+                    !chat.metadata?.archived
+                );
+                break;
+        }
+        
+        this.updateChatHistory(filteredChats);
+        this.updateEmptyState(filteredChats.length === 0);
+    }
+
+    /**
+     * Update empty state visibility
+     */
+    updateEmptyState(isEmpty) {
+        if (this.elements.emptyChatState) {
+            this.elements.emptyChatState.style.display = isEmpty ? 'flex' : 'none';
+        }
+    }
+
+    // ========== FILE ATTACHMENT UI METHODS ==========
+
+    /**
+     * Handle file selection for attachments
+     */
+    handleFileSelection(event) {
+        const files = Array.from(event.target.files);
+        if (files.length === 0) return;
+
+        // Store files in pending attachments for processing
+        this.pendingAttachments = files;
+
+        // Get current provider for validation
+        const currentProvider = this.getCurrentProvider();
+        
+        // Validate files for the current provider
+        this.eventBus.emit('attachment:validate', {
+            files: files,
+            providerId: currentProvider
+        });
+
+        // Show attachment preview
+        this.showAttachmentPreview(files);
+    }
+
+    /**
+     * Show attachment preview
+     */
+    showAttachmentPreview(files) {
+        if (!this.elements.attachmentContainer) return;
+
+        this.elements.attachmentContainer.style.display = 'block';
+        
+        // Clear existing preview
+        if (this.elements.attachmentList) {
+            this.elements.attachmentList.innerHTML = '';
+        }
+
+        // Add each file to the preview
+        files.forEach((file, index) => {
+            const fileElement = this.createAttachmentElement(file, index);
+            if (this.elements.attachmentList) {
+                this.elements.attachmentList.appendChild(fileElement);
+            }
+        });
+
+        // Update attachment info
+        this.updateAttachmentInfo(files);
+    }
+
+    /**
+     * Create attachment element for preview
+     */
+    createAttachmentElement(file, index) {
+        const element = document.createElement('div');
+        element.className = 'attachment-item';
+        element.dataset.fileIndex = index;
+
+        const icon = this.getFileIcon(file.type);
+        const size = this.formatFileSize(file.size);
+
+        element.innerHTML = `
+            <div class="attachment-icon">${icon}</div>
+            <div class="attachment-details">
+                <div class="attachment-name">${file.name}</div>
+                <div class="attachment-size">${size}</div>
+            </div>
+            <button class="attachment-remove" onclick="this.removeAttachment(${index})">×</button>
+        `;
+
+        return element;
+    }
+
+    /**
+     * Get file icon based on type
+     */
+    getFileIcon(mimeType) {
+        const icons = {
+            'text/': '📄',
+            'image/': '🖼️',
+            'application/pdf': '📕',
+            'application/json': '🔧',
+            'application/xml': '📰',
+            'text/csv': '📊',
+            'application/javascript': '⚙️',
+            'text/html': '🌐'
+        };
+
+        for (const [type, icon] of Object.entries(icons)) {
+            if (mimeType.startsWith(type)) {
+                return icon;
+            }
+        }
+
+        return '📎'; // Default attachment icon
+    }
+
+    /**
+     * Update attachment info display
+     */
+    updateAttachmentInfo(files) {
+        if (!this.elements.attachmentInfo) return;
+
+        const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+        const sizeText = this.formatFileSize(totalSize);
+        
+        this.elements.attachmentInfo.textContent = `${files.length} file(s) - ${sizeText}`;
+    }
+
+    /**
+     * Remove attachment from preview
+     */
+    removeAttachment(index) {
+        const attachmentItems = this.elements.attachmentList?.querySelectorAll('.attachment-item');
+        if (attachmentItems && attachmentItems[index]) {
+            attachmentItems[index].remove();
+        }
+
+        // Hide container if no attachments left
+        const remainingItems = this.elements.attachmentList?.querySelectorAll('.attachment-item');
+        if (!remainingItems || remainingItems.length === 0) {
+            this.hideAttachmentPreview();
+        }
+    }
+
+    /**
+     * Remove current attachment
+     */
+    removeCurrentAttachment() {
+        this.hideAttachmentPreview();
+        if (this.elements.fileInput) {
+            this.elements.fileInput.value = '';
+        }
+    }
+
+    /**
+     * Hide attachment preview
+     */
+    hideAttachmentPreview() {
+        if (this.elements.attachmentContainer) {
+            this.elements.attachmentContainer.style.display = 'none';
+        }
+    }
+
+    /**
+     * Update message attachments display
+     */
+    updateMessageAttachments(messageId, attachments) {
+        const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (!messageElement) return;
+
+        const attachmentContainer = messageElement.querySelector('.message-attachments');
+        if (!attachmentContainer) return;
+
+        // Clear existing attachments
+        attachmentContainer.innerHTML = '';
+
+        // Add new attachments
+        attachments.forEach(attachment => {
+            const attachmentElement = this.createMessageAttachmentElement(attachment);
+            attachmentContainer.appendChild(attachmentElement);
+        });
+    }
+
+    /**
+     * Create attachment element for message display
+     */
+    createMessageAttachmentElement(attachment) {
+        const element = document.createElement('div');
+        element.className = 'message-attachment';
+        element.dataset.attachmentId = attachment.id;
+
+        // If this is an image, show a preview
+        if (attachment.type && attachment.type.startsWith('image/')) {
+            element.classList.add('image-attachment');
+            const img = document.createElement('img');
+            img.className = 'attachment-image-preview max-w-xs max-h-60 rounded border border-chat-border cursor-pointer';
+            img.alt = attachment.name;
+            img.title = attachment.name;
+            
+            // Prefer processedData.data (base64), fallback to url, then object URL
+            let imageSrc = null;
+            if (attachment.processedData && attachment.processedData.data) {
+                imageSrc = attachment.processedData.data;
+            } else if (attachment.url) {
+                imageSrc = attachment.url;
+            } else if (attachment.file) {
+                imageSrc = URL.createObjectURL(attachment.file);
+            }
+            
+            if (imageSrc) {
+                img.src = imageSrc;
+            }
+            
+            // Click to enlarge modal (optional, if you have showImageModal)
+            if (typeof this.showImageModal === 'function') {
+                img.onclick = () => this.showImageModal(img.src, attachment.name);
+            }
+            // Image info (name and size)
+            const info = document.createElement('div');
+            info.className = 'attachment-image-info text-xs text-chat-secondary mt-1';
+            info.textContent = `${attachment.name} (${this.formatFileSize(attachment.size)})`;
+            element.appendChild(img);
+            element.appendChild(info);
+        } else {
+            // Default file display
+            const icon = this.getFileIcon(attachment.type);
+            const size = this.formatFileSize(attachment.size);
+            element.innerHTML = `
+                <div class="attachment-icon">${icon}</div>
+                <div class="attachment-details">
+                    <div class="attachment-name">${attachment.name}</div>
+                    <div class="attachment-size">${size}</div>
+                </div>
+            `;
+        }
+        return element;
+    }
+
+    /**
+     * Update attachment capabilities display
+     */
+    updateAttachmentCapabilities(capabilities) {
+        // Update UI to show what file types are supported by current provider
+        const currentProvider = this.getCurrentProvider();
+        const providerCapabilities = capabilities[currentProvider];
+        
+        if (providerCapabilities) {
+            // Update file input accept attribute
+            if (this.elements.fileInput) {
+                this.elements.fileInput.accept = providerCapabilities.supportedTypes.join(',');
+            }
+            
+            // Show provider-specific attachment info
+            this.showProviderAttachmentInfo(providerCapabilities);
+        }
+    }
+
+    /**
+     * Show provider-specific attachment information
+     */
+    showProviderAttachmentInfo(capabilities) {
+        const maxSizeMB = (capabilities.maxFileSize / 1024 / 1024).toFixed(1);
+        const supportedTypes = capabilities.supportedTypes.join(', ');
+        
+        // Update attachment info or show notification
+        this.showNotification({
+            message: `${capabilities.name} supports: ${supportedTypes} (max ${maxSizeMB}MB per file, ${capabilities.maxFiles} files max)`,
+            type: 'info',
+            duration: 3000
+        });
+    }
+
+    /**
+     * Get current provider ID
+     */
+    getCurrentProvider() {
+        // Get the current selected model from the model selector
+        const modelSelector = this.elements.modelSelector;
+        if (modelSelector && modelSelector.value) {
+            const selectedModel = modelSelector.value;
+            
+            // Extract provider from model ID (format: provider:model)
+            if (selectedModel.includes(':')) {
+                return selectedModel.split(':')[0];
+            }
+            
+            // If no provider prefix, try to determine from model name
+            const modelName = selectedModel.toLowerCase();
+            if (modelName.includes('gpt') || modelName.includes('openai')) {
+                return 'openai';
+            } else if (modelName.includes('claude') || modelName.includes('anthropic')) {
+                return 'anthropic';
+            } else if (modelName.includes('gemini')) {
+                return 'gemini';
+            } else if (modelName.includes('deepseek')) {
+                return 'deepseek';
+            } else if (modelName.includes('gemma') || modelName.includes('llama') || modelName.includes('mistral')) {
+                return 'lmstudio';
+            }
+        }
+        
+        // Default to OpenAI if no provider can be determined
+        return 'openai';
+    }
+
+    /**
+     * Get current attachments from the UI
+     */
+    getCurrentAttachments() {
+        // First check if we have pending attachments (files being processed)
+        if (this.pendingAttachments && this.pendingAttachments.length > 0) {
+            return this.pendingAttachments;
+        }
+
+        const attachmentItems = this.elements.attachmentList?.querySelectorAll('.attachment-item');
+        if (!attachmentItems || attachmentItems.length === 0) {
+            return [];
+        }
+
+        // Get all files from the file input
+        const fileInput = this.elements.fileInput;
+        if (!fileInput || !fileInput.files) {
+            return [];
+        }
+
+        // Convert FileList to Array for easier handling
+        const files = Array.from(fileInput.files);
+        
+        // Return all files (the UI should maintain the correct order)
+        return files;
+    }
+
+    /**
+     * Clear current attachments from the UI
+     */
+    clearCurrentAttachments() {
+        // Clear the file input
+        if (this.elements.fileInput) {
+            this.elements.fileInput.value = '';
+        }
+        
+        // Clear pending attachments
+        this.pendingAttachments = [];
+        
+        // Hide the attachment container
+        this.hideAttachmentPreview();
+    }
+
+    /**
+     * Debug the file attachment system
+     */
+    async debugAttachmentSystem() {
+        try {
+            console.log('🐛 [DEBUG] Starting file attachment system debug...');
+            
+            // Create a test file
+            const testContent = 'This is a test file for debugging the attachment system.';
+            const testFile = new File([testContent], 'test-debug.txt', { type: 'text/plain' });
+            
+            console.log('📁 [DEBUG] Test file created:', {
+                name: testFile.name,
+                type: testFile.type,
+                size: testFile.size
+            });
+            
+            // Test UI attachment handling
+            const uiFiles = [testFile];
+            console.log('📤 [DEBUG] UI files ready:', uiFiles.length);
+            
+            // Test getCurrentProvider
+            const currentProvider = this.getCurrentProvider();
+            console.log('🎯 [DEBUG] Current provider:', currentProvider);
+            
+            // Test getCurrentAttachments (simulate)
+            const currentAttachments = uiFiles;
+            console.log('📎 [DEBUG] Current attachments:', currentAttachments.length);
+            
+            // Simulate sending message with attachments
+            const messageData = {
+                content: 'Debug test: Please analyze this file',
+                type: 'user',
+                attachments: currentAttachments,
+                providerId: currentProvider
+            };
+            
+            console.log('📤 [DEBUG] Sending message with attachments:', {
+                content: messageData.content,
+                attachments: messageData.attachments.length,
+                providerId: messageData.providerId
+            });
+            
+            // Emit the event to test the flow
+            this.eventBus.emit('chat:message:send', messageData);
+            
+            // Show notification
+            this.showNotification({
+                message: 'Debug test completed! Check console for details.',
+                type: 'info',
+                duration: 5000
+            });
+            
+        } catch (error) {
+            console.error('❌ [DEBUG] File attachment debug failed:', error);
+            this.showNotification({
+                message: `Debug failed: ${error.message}`,
+                type: 'error',
+                duration: 5000
+            });
+        }
     }
 } 

@@ -1,14 +1,15 @@
 // Main Application Entry Point
 import { ChatManager } from './modules/chat/ChatManager.js';
-import { UIManager } from './modules/ui/UIManager.js?v=22';
+import { UIManager } from './modules/ui/UIManager.js?v=30';
 import { StorageManager } from './modules/storage/StorageManager.js';
-import { MCPAgentManager } from './modules/agents/MCPAgentManager.js';
+import { AgnosticMCPManager } from './modules/agents/AgnosticMCPManager.js';
 import { FileManager } from './modules/files/FileManager.js';
+import { FileAttachmentManager } from './modules/files/FileAttachmentManager.js';
 import { EventBus } from './modules/core/EventBus.js';
 import { ConfigManager } from './modules/core/ConfigManager.js';
 
 // Cache version for development
-const CACHE_VERSION = 21;
+const CACHE_VERSION = 27;
 
 class MCPTabajaraApp {
     constructor() {
@@ -16,9 +17,10 @@ class MCPTabajaraApp {
         this.configManager = new ConfigManager();
         this.storageManager = new StorageManager();
         this.uiManager = new UIManager(this.eventBus);
-        this.chatManager = new ChatManager(this.eventBus, this.storageManager);
-        this.mcpAgentManager = new MCPAgentManager(this.eventBus);
         this.fileManager = new FileManager(this.eventBus);
+        this.fileAttachmentManager = new FileAttachmentManager(this.eventBus, this.fileManager);
+        this.chatManager = new ChatManager(this.eventBus, this.storageManager, this.fileAttachmentManager);
+        this.mcpAgentManager = new AgnosticMCPManager(this.eventBus);
         
         this.isInitialized = false;
     }
@@ -36,6 +38,13 @@ class MCPTabajaraApp {
             await this.chatManager.initialize();
             await this.mcpAgentManager.initialize();
             await this.fileManager.initialize();
+            await this.fileAttachmentManager.initialize();
+            
+            // Expose managers globally for debugging
+            window.agnosticMCPManager = this.mcpAgentManager;
+            window.storageManager = this.storageManager;
+            window.eventBus = this.eventBus;
+            window.fileAttachmentManager = this.fileAttachmentManager;
             
             // Set up event listeners
             this.setupEventListeners();
@@ -81,6 +90,33 @@ class MCPTabajaraApp {
         window.addEventListener('beforeunload', () => {
             this.eventBus.emit('app:beforeunload');
         });
+
+        // Debug event listeners for file attachment flow
+        this.eventBus.on('chat:message:send', (data) => {
+            console.log('🔍 [DEBUG] chat:message:send event:', {
+                content: data.content?.substring(0, 50) + '...',
+                attachments: data.attachments?.length || 0,
+                providerId: data.providerId
+            });
+        });
+
+        this.eventBus.on('agent:message:process', (data) => {
+            console.log('🔍 [DEBUG] agent:message:process event:', {
+                messageId: data.message?.id,
+                chatId: data.message?.chatId,
+                attachments: data.attachments?.length || 0,
+                providerId: data.providerId
+            });
+        });
+
+        this.eventBus.on('request:queued', (request) => {
+            console.log('🔍 [DEBUG] request:queued event:', {
+                requestId: request.id,
+                chatId: request.chatId,
+                attachments: request.attachments?.length || 0,
+                options: request.options
+            });
+        });
     }
 
     async loadInitialData() {
@@ -88,8 +124,8 @@ class MCPTabajaraApp {
             // Load chat history
             await this.chatManager.loadChatHistory();
             
-            // Initialize MCP agents
-            await this.mcpAgentManager.loadAgents();
+            // Initialize MCP agents (loadAgents method is now handled by initialize)
+            // The AgnosticMCPManager handles all provider registration and initialization automatically
             
             // Load user preferences
             const userPreferences = await this.storageManager.get('userPreferences');
@@ -133,6 +169,7 @@ class MCPTabajaraApp {
             // Clean up resources
             this.mcpAgentManager.cleanup();
             this.fileManager.cleanup();
+            this.fileAttachmentManager.cleanup();
             this.uiManager.cleanup();
             
             this.isInitialized = false;

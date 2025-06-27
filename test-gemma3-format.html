@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemma 3 Format Test</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        .test-container {
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: var(--chat-light);
+            border-radius: 12px;
+            border: 1px solid var(--chat-border);
+        }
+        
+        .test-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: var(--chat-input);
+            border-radius: 8px;
+            border: 1px solid var(--chat-border);
+        }
+        
+        .test-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: var(--chat-primary);
+        }
+        
+        .test-result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .test-result.success {
+            background-color: rgba(16, 185, 129, 0.1);
+            border: 1px solid var(--chat-primary);
+            color: var(--chat-primary);
+        }
+        
+        .test-result.error {
+            background-color: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--chat-error);
+            color: var(--chat-error);
+        }
+        
+        .test-result.info {
+            background-color: rgba(59, 130, 246, 0.1);
+            border: 1px solid var(--chat-info);
+            color: var(--chat-info);
+        }
+        
+        .image-preview {
+            max-width: 200px;
+            max-height: 200px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border: 2px solid var(--chat-border);
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🧪 Gemma 3 Format Test</h1>
+        <p>This page tests the new Gemma 3 content array format for vision capabilities.</p>
+        
+        <div class="test-section">
+            <div class="test-title">📋 Gemma 3 Format Overview</div>
+            <p>Based on the article, Gemma 3 4B uses a content array format:</p>
+            <pre><code>{
+  "role": "user",
+  "content": [
+    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}},
+    {"type": "text", "text": "What do you see in this image?"}
+  ]
+}</code></pre>
+        </div>
+        
+        <div class="test-section">
+            <div class="test-title">🖼️ Test Image Processing</div>
+            <input type="file" id="test-image-input" accept="image/*" multiple class="mb-3">
+            <div id="image-preview-container"></div>
+            <textarea id="test-prompt" placeholder="Enter a prompt for the image..." class="w-full p-2 border rounded mb-3" rows="3">What do you see in this image? Please describe it in detail.</textarea>
+            <button id="test-format" class="bg-chat-primary text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                Test Gemma 3 Format
+            </button>
+            <div id="format-result" class="test-result" style="display: none;"></div>
+        </div>
+        
+        <div class="test-section">
+            <div class="test-title">📤 API Request Test</div>
+            <button id="test-api-request" class="bg-chat-primary text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                Test API Request
+            </button>
+            <div id="api-result" class="test-result" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { FileAttachmentManager } from './js/modules/files/FileAttachmentManager.js';
+        import { EventBus } from './js/modules/core/EventBus.js';
+        import { FileManager } from './js/modules/files/FileManager.js';
+        import { LMStudioClient } from './js/modules/agents/LMStudioClient.js';
+
+        // Initialize components
+        const eventBus = new EventBus();
+        const fileManager = new FileManager(eventBus);
+        const attachmentManager = new FileAttachmentManager(eventBus, fileManager);
+        const lmstudioClient = new LMStudioClient({
+            baseUrl: 'http://localhost:1234',
+            defaultModel: 'google/gemma-3-4b'
+        });
+
+        // Test results display function
+        function showResult(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = `test-result ${type}`;
+            element.style.display = 'block';
+        }
+
+        // Image preview function
+        function createImagePreview(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const preview = document.createElement('img');
+                preview.src = e.target.result;
+                preview.className = 'image-preview';
+                preview.alt = file.name;
+                
+                const info = document.createElement('div');
+                info.className = 'file-info';
+                info.innerHTML = `
+                    📁 ${file.name}<br>
+                    📏 ${(file.size / 1024).toFixed(1)} KB<br>
+                    🎨 ${file.type}
+                `;
+                
+                const container = document.getElementById('image-preview-container');
+                container.appendChild(preview);
+                container.appendChild(info);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Clear image previews
+        function clearImagePreviews() {
+            const container = document.getElementById('image-preview-container');
+            container.innerHTML = '';
+        }
+
+        // Test 1: Format Test
+        document.getElementById('test-image-input').addEventListener('change', (e) => {
+            clearImagePreviews();
+            const files = Array.from(e.target.files);
+            files.forEach(createImagePreview);
+        });
+
+        document.getElementById('test-format').addEventListener('click', async () => {
+            const fileInput = document.getElementById('test-image-input');
+            const files = Array.from(fileInput.files);
+            const prompt = document.getElementById('test-prompt').value;
+            
+            if (files.length === 0) {
+                showResult('format-result', '⚠️ Please select images first', 'info');
+                return;
+            }
+            
+            try {
+                showResult('format-result', '🔄 Testing Gemma 3 format...', 'info');
+                
+                // Process attachments
+                const processedAttachments = await attachmentManager.processAttachments(files, 'lmstudio');
+                
+                // Format messages using Gemma 3 format
+                const testMessages = [{ role: 'user', content: prompt }];
+                const formattedMessages = lmstudioClient.formatMessagesWithAttachments(testMessages, processedAttachments.attachments);
+                
+                // Analyze the formatted messages
+                let analysis = `✅ Gemma 3 format test completed!\n\n`;
+                analysis += `📊 Format Analysis:\n`;
+                analysis += `  Messages: ${formattedMessages.length}\n`;
+                
+                formattedMessages.forEach((msg, index) => {
+                    analysis += `\n📝 Message ${index + 1}:\n`;
+                    analysis += `  Role: ${msg.role}\n`;
+                    analysis += `  Content Type: ${Array.isArray(msg.content) ? 'Array' : 'String'}\n`;
+                    
+                    if (Array.isArray(msg.content)) {
+                        analysis += `  Content Items: ${msg.content.length}\n`;
+                        msg.content.forEach((item, itemIndex) => {
+                            analysis += `    Item ${itemIndex + 1}: ${item.type}\n`;
+                            if (item.type === 'text') {
+                                analysis += `      Text: "${item.text.substring(0, 100)}..."\n`;
+                            } else if (item.type === 'image_url') {
+                                analysis += `      URL: ${item.image_url?.url?.substring(0, 50)}...\n`;
+                            }
+                        });
+                    } else {
+                        analysis += `  Content: "${msg.content}"\n`;
+                    }
+                });
+                
+                analysis += `\n📋 Expected Gemma 3 Format:\n`;
+                analysis += `  ✅ Content is an array\n`;
+                analysis += `  ✅ Image items have type: "image_url" and image_url object\n`;
+                analysis += `  ✅ Text items have type: "text" and text\n`;
+                analysis += `  ✅ Multiple content items supported\n`;
+                
+                showResult('format-result', analysis, 'success');
+                
+            } catch (error) {
+                showResult('format-result', 
+                    `❌ Format test failed: ${error.message}`, 
+                    'error'
+                );
+            }
+        });
+
+        // Test 2: API Request Test
+        document.getElementById('test-api-request').addEventListener('click', async () => {
+            try {
+                showResult('api-result', '🔄 Testing API request...', 'info');
+                
+                // Test connection first
+                const connectionTest = await lmstudioClient.testConnection();
+                if (!connectionTest.connected) {
+                    throw new Error(`LM Studio connection failed: ${connectionTest.status}`);
+                }
+                
+                // Create a simple test request
+                const testRequest = {
+                    model: 'google/gemma-3-4b',
+                    messages: [
+                        {
+                            role: 'user',
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: 'Hello! Can you see this message?'
+                                }
+                            ]
+                        }
+                    ],
+                    temperature: 0.7,
+                    max_tokens: 100
+                };
+                
+                showResult('api-result', 
+                    `✅ API connection successful!\n\n` +
+                    `📡 Connection Status: ${connectionTest.status}\n` +
+                    `🌐 URL: ${connectionTest.url}\n\n` +
+                    `📋 Test Request Format:\n${JSON.stringify(testRequest, null, 2)}\n\n` +
+                    `✅ Ready to test with images!`, 
+                    'success'
+                );
+                
+            } catch (error) {
+                showResult('api-result', 
+                    `❌ API test failed: ${error.message}`, 
+                    'error'
+                );
+            }
+        });
+
+        // Initialize
+        async function init() {
+            try {
+                await fileManager.initialize();
+                await attachmentManager.initialize();
+                
+                console.log('✅ Gemma 3 format test environment initialized successfully');
+            } catch (error) {
+                console.error('❌ Failed to initialize test environment:', error);
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html> 

@@ -3,14 +3,16 @@
  * Implements the Repository and Command patterns
  */
 export class ChatManager {
-    constructor(eventBus, storageManager) {
+    constructor(eventBus, storageManager, fileAttachmentManager = null) {
         this.eventBus = eventBus;
         this.storageManager = storageManager;
+        this.fileAttachmentManager = fileAttachmentManager;
         this.currentChatId = null;
         this.currentChat = null;
         this.chatHistory = new Map();
         this.messageQueue = [];
         this.isProcessing = false;
+        this.currentAttachments = new Map(); // Track attachments per message
     }
 
     async initialize() {
@@ -59,6 +61,20 @@ export class ChatManager {
             await this.storeStreamingMessage(message);
         });
 
+        // Listen for assistant messages from agent managers and store them
+        this.eventBus.on('chat:message:received', async (message) => {
+            // Only store assistant messages (user messages are already stored in sendMessage)
+            if (message.role === 'assistant') {
+                try {
+                    await this.storageManager.create('messages', message);
+                    await this.updateChatLastMessage(message.chatId);
+                    console.log('✅ Assistant message stored:', message.id);
+                } catch (error) {
+                    console.error('Failed to store assistant message:', error);
+                }
+            }
+        });
+
         this.eventBus.on('message:delete', async (data) => {
             await this.deleteMessage(data.messageId, data.chatId);
         });
@@ -69,6 +85,22 @@ export class ChatManager {
 
         this.eventBus.on('message:regenerate', async (data) => {
             await this.regenerateMessage(data.messageId, data.chatId);
+        });
+
+        this.eventBus.on('chat:archive', async (chatId) => {
+            await this.archiveChat(chatId);
+        });
+
+        this.eventBus.on('message:attachments:add', async (data) => {
+            await this.addAttachmentsToMessage(data.messageId, data.files, data.providerId);
+        });
+
+        this.eventBus.on('message:attachments:remove', async (data) => {
+            await this.removeAttachmentsFromMessage(data.messageId, data.attachmentIds);
+        });
+
+        this.eventBus.on('message:attachments:clear', async (messageId) => {
+            await this.clearMessageAttachments(messageId);
         });
     }
 
@@ -94,7 +126,7 @@ export class ChatManager {
                 this.createNewChat();
             }
 
-            this.eventBus.emit('chat:history:loaded', Array.from(this.chatHistory.values()));
+            this.eventBus.emit('chat:history:loaded', this.getSortedChats());
         } catch (error) {
             console.error('Failed to load chat history:', error);
             this.createNewChat();
@@ -125,10 +157,13 @@ export class ChatManager {
             this.selectChat(chatId);
             
             this.eventBus.emit('chat:created', newChat);
-            this.eventBus.emit('chat:history:updated', Array.from(this.chatHistory.values()));
+            this.eventBus.emit('chat:history:updated', this.getSortedChats());
+            
+            return newChat;
         } catch (error) {
             console.error('Failed to create new chat:', error);
             this.eventBus.emit('ui:error', { message: 'Failed to create new chat' });
+            throw error;
         }
     }
 
@@ -177,8 +212,64 @@ export class ChatManager {
         };
 
         try {
-            // Save user message
-            await this.storageManager.create('messages', message);
+            // Process file attachments if present
+            let attachments = [];
+            if (messageData.attachments && messageData.attachments.length > 0 && this.fileAttachmentManager) {
+                try {
+                    const providerId = messageData.providerId || 'openai'; // Default to OpenAI
+                    const processedAttachments = await this.fileAttachmentManager.processAttachments(
+                        messageData.attachments, 
+                        providerId
+                    );
+                    attachments = processedAttachments.attachments;
+                    
+                    // Store full attachment info (for UI rendering)
+                    message.metadata.attachments = attachments;
+                    
+                    // Store attachments for this message
+                    this.currentAttachments.set(message.id, attachments);
+                    
+                    // Emit attachment processed event
+                    this.eventBus.emit('attachment:processed', {
+                        messageId: message.id,
+                        attachments: attachments,
+                        providerId: providerId
+                    });
+                    
+                } catch (error) {
+                    console.error('Failed to process attachments:', error);
+                    this.eventBus.emit('attachment:error', { 
+                        message: `Failed to process attachments: ${error.message}`,
+                        messageId: message.id
+                    });
+                    this.eventBus.emit('ui:notification', {
+                        message: `Failed to process attachments: ${error.message}`,
+                        type: 'error'
+                    });
+                }
+            }
+
+            // Save user message (store only summary for storage)
+            const storageMessage = { ...message };
+            if (storageMessage.metadata && storageMessage.metadata.attachments) {
+                // Store full attachment data separately for persistence
+                if (attachments.length > 0) {
+                    await this.storageManager.create('message_attachments', {
+                        messageId: message.id,
+                        attachments: attachments,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+                
+                // Keep only summary in main message
+                storageMessage.metadata.attachments = storageMessage.metadata.attachments.map(att => ({
+                    id: att.id,
+                    name: att.name,
+                    type: att.type,
+                    size: att.size
+                }));
+            }
+            await this.storageManager.create('messages', storageMessage);
             
             // Update chat title if this is the first message
             if (this.currentChat.messageCount === 0) {
@@ -189,13 +280,14 @@ export class ChatManager {
             // Update chat metadata
             await this.updateChatLastMessage(this.currentChatId);
 
-            // Emit message received event
+            // Emit message received event (with full attachments for UI)
             this.eventBus.emit('chat:message:received', message);
 
-            // Send to MCP agent for processing
+            // Send to MCP agent for processing with attachments
             this.eventBus.emit('agent:message:process', {
-                chatId: this.currentChatId,
-                message: message
+                message: message,
+                attachments: attachments,
+                providerId: messageData.providerId
             });
 
         } catch (error) {
@@ -245,7 +337,30 @@ export class ChatManager {
     async loadChatMessages(chatId) {
         try {
             const messages = await this.storageManager.getAll('messages', 'chatId', chatId);
-            return messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            
+            // Restore full attachment data for messages that have attachments
+            const restoredMessages = await Promise.all(messages.map(async (message) => {
+                if (message.metadata?.attachments && message.metadata.attachments.length > 0) {
+                    try {
+                        // Try to load full attachment data from separate storage
+                        const attachmentData = await this.storageManager.read('message_attachments', message.id);
+                        if (attachmentData && attachmentData.attachments) {
+                            // Restore full attachment data
+                            message.metadata.attachments = attachmentData.attachments;
+                            console.log(`🔄 [DEBUG] Restored full attachment data for message ${message.id}:`, 
+                                attachmentData.attachments.map(att => ({ name: att.name, hasData: !!att.processedData?.data }))
+                            );
+                        } else {
+                            console.log(`⚠️ [DEBUG] No full attachment data found for message ${message.id}, using summary data`);
+                        }
+                    } catch (error) {
+                        console.log(`⚠️ [DEBUG] Failed to load attachment data for message ${message.id}:`, error.message);
+                    }
+                }
+                return message;
+            }));
+            
+            return restoredMessages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
         } catch (error) {
             console.error('Failed to load chat messages:', error);
             return [];
@@ -261,6 +376,13 @@ export class ChatManager {
             const messages = await this.loadChatMessages(chatId);
             for (const message of messages) {
                 await this.storageManager.delete('messages', message.id);
+                
+                // Delete associated attachment data
+                try {
+                    await this.storageManager.delete('message_attachments', message.id);
+                } catch (error) {
+                    // Attachment data might not exist, ignore error
+                }
             }
 
             // Delete chat
@@ -278,7 +400,7 @@ export class ChatManager {
             }
 
             this.eventBus.emit('chat:deleted', chatId);
-            this.eventBus.emit('chat:history:updated', Array.from(this.chatHistory.values()));
+            this.eventBus.emit('chat:history:updated', this.getSortedChats());
         } catch (error) {
             console.error('Failed to delete chat:', error);
             this.eventBus.emit('ui:error', { message: 'Failed to delete chat' });
@@ -302,7 +424,7 @@ export class ChatManager {
             this.chatHistory.set(chatId, chat);
 
             this.eventBus.emit('chat:renamed', chatId, newTitle);
-            this.eventBus.emit('chat:history:updated', Array.from(this.chatHistory.values()));
+            this.eventBus.emit('chat:history:updated', this.getSortedChats());
         } catch (error) {
             console.error('Failed to rename chat:', error);
             this.eventBus.emit('ui:error', { message: 'Failed to rename chat' });
@@ -310,27 +432,37 @@ export class ChatManager {
     }
 
     /**
-     * Clear all messages in the current chat
+     * Clear current chat messages
      */
     async clearCurrentChat() {
         if (!this.currentChatId) return;
 
         try {
+            // Delete all messages for this chat
             const messages = await this.loadChatMessages(this.currentChatId);
             for (const message of messages) {
                 await this.storageManager.delete('messages', message.id);
+                
+                // Delete associated attachment data
+                try {
+                    await this.storageManager.delete('message_attachments', message.id);
+                } catch (error) {
+                    // Attachment data might not exist, ignore error
+                }
             }
 
             // Reset chat metadata
             const chat = this.chatHistory.get(this.currentChatId);
-            chat.messageCount = 0;
-            chat.lastMessageTime = new Date().toISOString();
-            
-            await this.storageManager.update('chats', chat);
-            this.chatHistory.set(this.currentChatId, chat);
+            if (chat) {
+                chat.messageCount = 0;
+                chat.lastMessageTime = new Date().toISOString();
+                await this.storageManager.update('chats', this.currentChatId, chat);
+                this.chatHistory.set(this.currentChatId, chat);
+            }
 
             this.eventBus.emit('chat:cleared', this.currentChatId);
             this.eventBus.emit('chat:messages:loaded', []);
+            this.eventBus.emit('chat:history:updated', this.getSortedChats());
         } catch (error) {
             console.error('Failed to clear chat:', error);
             this.eventBus.emit('ui:error', { message: 'Failed to clear chat' });
@@ -369,7 +501,16 @@ export class ChatManager {
      */
     async deleteMessage(messageId, chatId) {
         try {
+            // Delete the message
             await this.storageManager.delete('messages', messageId);
+            
+            // Delete associated attachment data
+            try {
+                await this.storageManager.delete('message_attachments', messageId);
+            } catch (error) {
+                // Attachment data might not exist, ignore error
+                console.log(`No attachment data to delete for message ${messageId}`);
+            }
             
             // Update chat metadata
             const chat = this.chatHistory.get(chatId);
@@ -377,6 +518,10 @@ export class ChatManager {
                 chat.messageCount -= 1;
                 await this.storageManager.update('chats', chat);
                 this.chatHistory.set(chatId, chat);
+                
+                // Emit event to notify UI of chat update
+                this.eventBus.emit('chat:updated', chat);
+                this.eventBus.emit('chat:history:updated', this.getSortedChats());
             }
             
         } catch (error) {
@@ -447,6 +592,10 @@ export class ChatManager {
             if (chatId === this.currentChatId) {
                 this.eventBus.emit('ui:chat:title', title);
             }
+            
+            // Emit event to notify UI of chat update
+            this.eventBus.emit('chat:updated', chat);
+            this.eventBus.emit('chat:history:updated', this.getSortedChats());
         }
     }
 
@@ -460,15 +609,63 @@ export class ChatManager {
             chat.messageCount += 1;
             await this.storageManager.update('chats', chat);
             this.chatHistory.set(chatId, chat);
+            
+            // Emit event to notify UI of chat update
+            this.eventBus.emit('chat:updated', chat);
+            this.eventBus.emit('chat:history:updated', this.getSortedChats());
         }
     }
 
     /**
-     * Generate chat title from first message
+     * Generate a chat title from the first message
      */
     generateChatTitle(content) {
-        const words = content.trim().split(' ').slice(0, 6);
-        return words.join(' ') + (content.split(' ').length > 6 ? '...' : '');
+        if (!content || typeof content !== 'string') {
+            return 'New Chat';
+        }
+
+        // Clean the content
+        let cleanContent = content.trim();
+        
+        // Remove markdown formatting
+        cleanContent = cleanContent.replace(/\*\*(.*?)\*\*/g, '$1'); // Bold
+        cleanContent = cleanContent.replace(/\*(.*?)\*/g, '$1'); // Italic
+        cleanContent = cleanContent.replace(/`(.*?)`/g, '$1'); // Code
+        cleanContent = cleanContent.replace(/\[(.*?)\]\(.*?\)/g, '$1'); // Links
+        
+        // Remove code blocks
+        cleanContent = cleanContent.replace(/```[\s\S]*?```/g, '');
+        
+        // Get the first sentence or first 100 characters
+        let title = cleanContent.split(/[.!?]/)[0].trim();
+        
+        if (title.length > 100) {
+            title = title.substring(0, 100).trim();
+            // Try to break at a word boundary
+            const lastSpace = title.lastIndexOf(' ');
+            if (lastSpace > 80) {
+                title = title.substring(0, lastSpace);
+            }
+        }
+        
+        // If title is too short, use more content
+        if (title.length < 10) {
+            title = cleanContent.substring(0, 50).trim();
+            const lastSpace = title.lastIndexOf(' ');
+            if (lastSpace > 20) {
+                title = title.substring(0, lastSpace);
+            }
+        }
+        
+        // Capitalize first letter
+        title = title.charAt(0).toUpperCase() + title.slice(1);
+        
+        // Add ellipsis if truncated
+        if (title.length >= 100) {
+            title += '...';
+        }
+        
+        return title || 'New Chat';
     }
 
     /**
@@ -542,5 +739,164 @@ export class ChatManager {
         this.messageQueue.length = 0;
         this.currentChatId = null;
         this.currentChat = null;
+    }
+
+    /**
+     * Archive a chat
+     */
+    async archiveChat(chatId) {
+        try {
+            const chat = this.chatHistory.get(chatId);
+            if (!chat) {
+                throw new Error(`Chat ${chatId} not found`);
+            }
+
+            // Update chat metadata
+            chat.metadata = chat.metadata || {};
+            chat.metadata.archived = true;
+            chat.archivedAt = new Date().toISOString();
+
+            // Update in storage
+            await this.storageManager.update('chats', chatId, chat);
+            this.chatHistory.set(chatId, chat);
+
+            // If this was the current chat, create a new one
+            if (this.currentChatId === chatId) {
+                await this.createNewChat();
+            }
+
+            this.eventBus.emit('chat:archived', chatId);
+            this.eventBus.emit('chat:history:updated', this.getSortedChats());
+        } catch (error) {
+            console.error('Failed to archive chat:', error);
+            this.eventBus.emit('ui:error', { message: 'Failed to archive chat' });
+        }
+    }
+
+    /**
+     * Get sorted chats
+     */
+    getSortedChats() {
+        return Array.from(this.chatHistory.values())
+            .sort((a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime));
+    }
+
+    // ========== ATTACHMENT MANAGEMENT METHODS ==========
+
+    /**
+     * Add attachments to a message
+     */
+    async addAttachmentsToMessage(messageId, files, providerId) {
+        if (!this.fileAttachmentManager) {
+            throw new Error('File attachment manager not available');
+        }
+
+        try {
+            const processedAttachments = await this.fileAttachmentManager.processAttachments(files, providerId);
+            
+            // Get existing attachments for this message
+            const existingAttachments = this.currentAttachments.get(messageId) || [];
+            const allAttachments = [...existingAttachments, ...processedAttachments.attachments];
+            
+            // Store updated attachments
+            this.currentAttachments.set(messageId, allAttachments);
+            
+            // Update message metadata
+            const message = await this.storageManager.get('messages', messageId);
+            if (message) {
+                message.metadata.attachments = allAttachments.map(att => ({
+                    id: att.id,
+                    name: att.name,
+                    type: att.type,
+                    size: att.size
+                }));
+                await this.storageManager.update('messages', messageId, message);
+            }
+            
+            this.eventBus.emit('message:attachments:updated', {
+                messageId: messageId,
+                attachments: allAttachments
+            });
+            
+            return processedAttachments;
+        } catch (error) {
+            console.error('Failed to add attachments to message:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Remove attachments from a message
+     */
+    async removeAttachmentsFromMessage(messageId, attachmentIds) {
+        const existingAttachments = this.currentAttachments.get(messageId) || [];
+        const remainingAttachments = existingAttachments.filter(att => !attachmentIds.includes(att.id));
+        
+        this.currentAttachments.set(messageId, remainingAttachments);
+        
+        // Update message metadata
+        const message = await this.storageManager.get('messages', messageId);
+        if (message) {
+            message.metadata.attachments = remainingAttachments.map(att => ({
+                id: att.id,
+                name: att.name,
+                type: att.type,
+                size: att.size
+            }));
+            await this.storageManager.update('messages', messageId, message);
+        }
+        
+        this.eventBus.emit('message:attachments:updated', {
+            messageId: messageId,
+            attachments: remainingAttachments
+        });
+    }
+
+    /**
+     * Clear all attachments from a message
+     */
+    async clearMessageAttachments(messageId) {
+        this.currentAttachments.delete(messageId);
+        
+        // Update message metadata
+        const message = await this.storageManager.get('messages', messageId);
+        if (message) {
+            message.metadata.attachments = [];
+            await this.storageManager.update('messages', messageId, message);
+        }
+        
+        this.eventBus.emit('message:attachments:updated', {
+            messageId: messageId,
+            attachments: []
+        });
+    }
+
+    /**
+     * Get attachments for a message
+     */
+    getMessageAttachments(messageId) {
+        return this.currentAttachments.get(messageId) || [];
+    }
+
+    /**
+     * Validate attachments for a provider
+     */
+    async validateAttachments(files, providerId) {
+        if (!this.fileAttachmentManager) {
+            return { valid: false, error: 'File attachment manager not available' };
+        }
+        
+        return await this.fileAttachmentManager.validateAttachments(files, providerId);
+    }
+
+    /**
+     * Get provider attachment capabilities
+     */
+    getProviderAttachmentCapabilities(providerId) {
+        if (!this.fileAttachmentManager) {
+            return null;
+        }
+        
+        return this.fileAttachmentManager.getProviderCapabilities(providerId);
     }
 } 
