@@ -195,4 +195,90 @@ window.addEventListener('beforeunload', async () => {
 });
 
 // Export for debugging
-export { MCPTabajaraApp }; 
+export { MCPTabajaraApp };
+
+// Add mobile sidebar functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const sidebar = document.getElementById('sidebar');
+    const toggleSidebarBtn = document.getElementById('toggle-sidebar');
+    const closeSidebarBtn = document.getElementById('close-sidebar');
+    
+    // Function to toggle sidebar
+    function toggleSidebar() {
+        sidebar.classList.toggle('active');
+    }
+    
+    // Toggle sidebar on button click
+    toggleSidebarBtn.addEventListener('click', toggleSidebar);
+    closeSidebarBtn.addEventListener('click', toggleSidebar);
+    
+    // Close sidebar when clicking outside on mobile
+    document.addEventListener('click', function(event) {
+        const isClickInside = sidebar.contains(event.target) || toggleSidebarBtn.contains(event.target);
+        if (!isClickInside && sidebar.classList.contains('active')) {
+            toggleSidebar();
+        }
+    });
+    
+    // Handle mobile keyboard adjustments
+    const messageInput = document.getElementById('message-input');
+    const chatContainer = document.getElementById('chat-container');
+    
+    // On mobile, when the keyboard appears, scroll the chat to bottom
+    messageInput.addEventListener('focus', function() {
+        if (window.innerWidth <= 768) {
+            setTimeout(() => {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }, 100);
+        }
+    });
+    
+    // Prevent zoom on double tap for touch devices
+    let lastTouchEnd = 0;
+    document.addEventListener('touchend', function(event) {
+        const now = (new Date()).getTime();
+        if (now - lastTouchEnd <= 300) {
+            event.preventDefault();
+        }
+        lastTouchEnd = now;
+    }, false);
+    
+    // Adjust UI for mobile keyboard
+    const originalHeight = window.innerHeight;
+    window.addEventListener('resize', function() {
+        if (window.innerWidth <= 768) {
+            const heightDiff = originalHeight - window.innerHeight;
+            if (heightDiff > 150) { // Keyboard is likely visible
+                chatContainer.style.paddingBottom = '20px';
+            } else {
+                chatContainer.style.paddingBottom = '0';
+            }
+        }
+    });
+    
+    // Handle quick action buttons scrolling on mobile
+    const quickActions = document.getElementById('quick-actions');
+    if (quickActions) {
+        let isScrolling = false;
+        let startX;
+        let scrollLeft;
+        
+        quickActions.addEventListener('touchstart', (e) => {
+            isScrolling = true;
+            startX = e.touches[0].pageX - quickActions.offsetLeft;
+            scrollLeft = quickActions.scrollLeft;
+        });
+        
+        quickActions.addEventListener('touchmove', (e) => {
+            if (!isScrolling) return;
+            e.preventDefault();
+            const x = e.touches[0].pageX - quickActions.offsetLeft;
+            const walk = (x - startX) * 2;
+            quickActions.scrollLeft = scrollLeft - walk;
+        });
+        
+        quickActions.addEventListener('touchend', () => {
+            isScrolling = false;
+        });
+    }
+}); 
