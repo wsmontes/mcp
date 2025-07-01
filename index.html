@@ -2,8 +2,12 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>MCP Tabajara - Intelligent Assistant</title>
+    <!-- Add iOS specific meta tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="format-detection" content="telephone=no">
     <link rel="stylesheet" href="css/styles.css">
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -121,7 +125,7 @@
         <!-- Main Chat Area -->
         <div class="main-chat-area flex flex-col">
             <!-- Chat Header -->
-            <div class="bg-chat-light border-b border-chat-border p-3 flex items-center justify-between">
+            <div class="chat-header bg-chat-light border-b border-chat-border flex items-center justify-between">
                 <div class="flex items-center space-x-3">
                     <button id="toggle-sidebar" class="p-2 rounded-lg hover:bg-chat-hover transition-colors lg:hidden">
                         <i class="fas fa-bars"></i>
@@ -149,18 +153,20 @@
                         </div>
                     </div>
                     
-                    <button id="voice-btn" class="p-2 rounded-lg hover:bg-chat-hover transition-colors" title="Voice input">
-                        <i class="fas fa-microphone"></i>
-                    </button>
-                    <button id="conversation-btn" class="p-2 rounded-lg hover:bg-chat-hover transition-colors" title="Start conversation mode">
-                        <i class="fas fa-comments"></i>
-                    </button>
-                    <button id="file-upload-btn" class="p-2 rounded-lg hover:bg-chat-hover transition-colors" title="Upload files">
-                        <i class="fas fa-paperclip"></i>
-                    </button>
-                    <button id="more-options" class="p-2 rounded-lg hover:bg-chat-hover transition-colors" title="More options">
-                        <i class="fas fa-ellipsis-v"></i>
-                    </button>
+                    <div class="flex items-center space-x-2">
+                        <button id="voice-btn" class="p-2 rounded-lg hover:bg-chat-hover transition-colors" title="Voice input">
+                            <i class="fas fa-microphone"></i>
+                        </button>
+                        <button id="conversation-btn" class="hidden sm:block p-2 rounded-lg hover:bg-chat-hover transition-colors" title="Start conversation mode">
+                            <i class="fas fa-comments"></i>
+                        </button>
+                        <button id="file-upload-btn" class="p-2 rounded-lg hover:bg-chat-hover transition-colors" title="Upload files">
+                            <i class="fas fa-paperclip"></i>
+                        </button>
+                        <button id="more-options" class="p-2 rounded-lg hover:bg-chat-hover transition-colors" title="More options">
+                            <i class="fas fa-ellipsis-v"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
             
@@ -172,8 +178,8 @@
             </div>
             
             <!-- Input Area -->
-            <div class="bg-chat-light border-t border-chat-border p-3">
-                <div class="max-w-3xl mx-auto">
+            <div class="input-area bg-chat-light border-t border-chat-border">
+                <div class="max-w-3xl mx-auto px-3">
                     <div class="relative">
                         <div id="input-container" class="bg-chat-input border border-chat-border rounded-xl flex items-center space-x-2">
                             <textarea

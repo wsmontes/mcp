@@ -199,64 +199,122 @@ export { MCPTabajaraApp };
 
 // Add mobile sidebar functionality
 document.addEventListener('DOMContentLoaded', function() {
+    // Detect iOS
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    // Handle iOS viewport height issues
+    function setIOSViewportHeight() {
+        if (isIOS) {
+            const vh = window.innerHeight * 0.01;
+            document.documentElement.style.setProperty('--vh', `${vh}px`);
+            document.getElementById('app').style.height = `calc(var(--vh, 1vh) * 100)`;
+        }
+    }
+
+    // Call on initial load and resize
+    setIOSViewportHeight();
+    window.addEventListener('resize', setIOSViewportHeight);
+
+    // Handle iOS keyboard issues
+    const messageInput = document.getElementById('message-input');
+    const chatContainer = document.getElementById('chat-container');
+    const inputArea = document.querySelector('.input-area');
+
+    if (isIOS) {
+        // Prevent elastic scrolling
+        document.body.style.overflow = 'hidden';
+        chatContainer.style.overscrollBehavior = 'none';
+
+        // Handle keyboard appearance
+        messageInput.addEventListener('focus', function() {
+            // Add a slight delay to ensure the keyboard is fully shown
+            setTimeout(() => {
+                // Scroll to bottom
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+                
+                // Add padding to prevent content from being hidden behind keyboard
+                document.body.classList.add('keyboard-open');
+                inputArea.style.position = 'relative';
+            }, 100);
+        });
+
+        messageInput.addEventListener('blur', function() {
+            // Remove padding when keyboard is hidden
+            document.body.classList.remove('keyboard-open');
+            inputArea.style.position = 'sticky';
+        });
+    }
+
+    // Prevent double-tap zoom on buttons and interactive elements
+    const interactiveElements = document.querySelectorAll('button, .quick-action-btn, input, textarea');
+    interactiveElements.forEach(element => {
+        element.addEventListener('touchend', function(e) {
+            e.preventDefault();
+            if (e.target.tagName === 'BUTTON' || e.target.classList.contains('quick-action-btn')) {
+                e.target.click();
+            }
+        });
+    });
+
+    // Improve scrolling performance
+    let touchStartY;
+    chatContainer.addEventListener('touchstart', function(e) {
+        touchStartY = e.touches[0].clientY;
+    }, { passive: true });
+
+    chatContainer.addEventListener('touchmove', function(e) {
+        const touchY = e.touches[0].clientY;
+        const scrollTop = chatContainer.scrollTop;
+        
+        // Prevent overscroll when at the top or bottom
+        if (scrollTop <= 0 && touchY > touchStartY) {
+            e.preventDefault();
+        }
+        if (scrollTop >= chatContainer.scrollHeight - chatContainer.clientHeight && touchY < touchStartY) {
+            e.preventDefault();
+        }
+    }, { passive: false });
+
+    // Handle iOS safe areas
+    function updateSafeAreas() {
+        const safeAreaTop = getComputedStyle(document.documentElement).getPropertyValue('--safe-area-inset-top');
+        const safeAreaBottom = getComputedStyle(document.documentElement).getPropertyValue('--safe-area-inset-bottom');
+        
+        if (safeAreaTop && safeAreaBottom) {
+            document.body.style.paddingTop = safeAreaTop;
+            inputArea.style.paddingBottom = safeAreaBottom;
+        }
+    }
+
+    // Update safe areas on orientation change
+    window.addEventListener('orientationchange', function() {
+        setTimeout(updateSafeAreas, 100);
+    });
+
+    // Initialize safe areas
+    updateSafeAreas();
+
+    // Existing sidebar functionality
     const sidebar = document.getElementById('sidebar');
     const toggleSidebarBtn = document.getElementById('toggle-sidebar');
     const closeSidebarBtn = document.getElementById('close-sidebar');
     
-    // Function to toggle sidebar
     function toggleSidebar() {
         sidebar.classList.toggle('active');
     }
     
-    // Toggle sidebar on button click
     toggleSidebarBtn.addEventListener('click', toggleSidebar);
     closeSidebarBtn.addEventListener('click', toggleSidebar);
     
-    // Close sidebar when clicking outside on mobile
     document.addEventListener('click', function(event) {
         const isClickInside = sidebar.contains(event.target) || toggleSidebarBtn.contains(event.target);
         if (!isClickInside && sidebar.classList.contains('active')) {
             toggleSidebar();
         }
     });
-    
-    // Handle mobile keyboard adjustments
-    const messageInput = document.getElementById('message-input');
-    const chatContainer = document.getElementById('chat-container');
-    
-    // On mobile, when the keyboard appears, scroll the chat to bottom
-    messageInput.addEventListener('focus', function() {
-        if (window.innerWidth <= 768) {
-            setTimeout(() => {
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-            }, 100);
-        }
-    });
-    
-    // Prevent zoom on double tap for touch devices
-    let lastTouchEnd = 0;
-    document.addEventListener('touchend', function(event) {
-        const now = (new Date()).getTime();
-        if (now - lastTouchEnd <= 300) {
-            event.preventDefault();
-        }
-        lastTouchEnd = now;
-    }, false);
-    
-    // Adjust UI for mobile keyboard
-    const originalHeight = window.innerHeight;
-    window.addEventListener('resize', function() {
-        if (window.innerWidth <= 768) {
-            const heightDiff = originalHeight - window.innerHeight;
-            if (heightDiff > 150) { // Keyboard is likely visible
-                chatContainer.style.paddingBottom = '20px';
-            } else {
-                chatContainer.style.paddingBottom = '0';
-            }
-        }
-    });
-    
-    // Handle quick action buttons scrolling on mobile
+
+    // Quick actions horizontal scroll optimization
     const quickActions = document.getElementById('quick-actions');
     if (quickActions) {
         let isScrolling = false;
@@ -267,18 +325,23 @@ document.addEventListener('DOMContentLoaded', function() {
             isScrolling = true;
             startX = e.touches[0].pageX - quickActions.offsetLeft;
             scrollLeft = quickActions.scrollLeft;
-        });
+        }, { passive: true });
         
         quickActions.addEventListener('touchmove', (e) => {
             if (!isScrolling) return;
-            e.preventDefault();
             const x = e.touches[0].pageX - quickActions.offsetLeft;
             const walk = (x - startX) * 2;
             quickActions.scrollLeft = scrollLeft - walk;
-        });
+        }, { passive: true });
         
         quickActions.addEventListener('touchend', () => {
             isScrolling = false;
-        });
+        }, { passive: true });
     }
+
+    // Auto-expand textarea
+    messageInput.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+    });
 }); 
