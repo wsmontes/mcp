@@ -203,6 +203,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
                   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
+    // Detect Chrome on iOS
+    const isIOSChrome = isIOS && /CriOS/.test(navigator.userAgent);
+
     // Handle iOS viewport height issues
     function setIOSViewportHeight() {
         if (isIOS) {
@@ -248,6 +251,28 @@ document.addEventListener('DOMContentLoaded', function() {
     const header = document.querySelector('.chat-header');
 
     if (isIOS) {
+        // Special handling for Chrome on iOS
+        if (isIOSChrome) {
+            // Ensure input is focusable
+            messageInput.addEventListener('touchstart', function(e) {
+                e.preventDefault();
+                this.focus();
+            });
+
+            // Improve button click handling
+            document.querySelectorAll('button, .quick-action-btn').forEach(button => {
+                button.addEventListener('touchstart', function(e) {
+                    e.preventDefault();
+                    this.click();
+                });
+            });
+
+            // Improve scroll handling
+            chatContainer.addEventListener('touchmove', function(e) {
+                e.stopPropagation();
+            }, { passive: true });
+        }
+
         // Prevent elastic scrolling
         document.body.style.overflow = 'hidden';
         chatContainer.style.overscrollBehavior = 'none';
@@ -265,6 +290,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Adjust for keyboard
                 document.body.classList.add('keyboard-open');
                 inputArea.style.position = 'relative';
+
+                // Ensure input is in view
+                this.scrollIntoView(false);
             }, 100);
         });
 
@@ -286,37 +314,48 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
         });
+
+        // Improve touch handling for quick actions
+        const quickActions = document.getElementById('quick-actions');
+        if (quickActions) {
+            let isScrolling = false;
+            let startX;
+            let scrollLeft;
+            
+            quickActions.addEventListener('touchstart', (e) => {
+                isScrolling = true;
+                startX = e.touches[0].pageX - quickActions.offsetLeft;
+                scrollLeft = quickActions.scrollLeft;
+            }, { passive: true });
+            
+            quickActions.addEventListener('touchmove', (e) => {
+                if (!isScrolling) return;
+                const x = e.touches[0].pageX - quickActions.offsetLeft;
+                const walk = (x - startX) * 2;
+                quickActions.scrollLeft = scrollLeft - walk;
+            }, { passive: true });
+            
+            quickActions.addEventListener('touchend', () => {
+                isScrolling = false;
+            }, { passive: true });
+
+            // Improve quick action button clicks
+            quickActions.querySelectorAll('.quick-action-btn').forEach(btn => {
+                btn.addEventListener('touchend', function(e) {
+                    if (!isScrolling) {
+                        e.preventDefault();
+                        this.click();
+                    }
+                });
+            });
+        }
     }
 
-    // Prevent double-tap zoom on buttons and interactive elements
-    const interactiveElements = document.querySelectorAll('button, .quick-action-btn, input, textarea');
-    interactiveElements.forEach(element => {
-        element.addEventListener('touchend', function(e) {
-            e.preventDefault();
-            if (e.target.tagName === 'BUTTON' || e.target.classList.contains('quick-action-btn')) {
-                e.target.click();
-            }
-        });
+    // Auto-expand textarea
+    messageInput.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
     });
-
-    // Improve scrolling performance
-    let touchStartY;
-    chatContainer.addEventListener('touchstart', function(e) {
-        touchStartY = e.touches[0].clientY;
-    }, { passive: true });
-
-    chatContainer.addEventListener('touchmove', function(e) {
-        const touchY = e.touches[0].clientY;
-        const scrollTop = chatContainer.scrollTop;
-        
-        // Prevent overscroll when at the top or bottom
-        if (scrollTop <= 0 && touchY > touchStartY) {
-            e.preventDefault();
-        }
-        if (scrollTop >= chatContainer.scrollHeight - chatContainer.clientHeight && touchY < touchStartY) {
-            e.preventDefault();
-        }
-    }, { passive: false });
 
     // Handle iOS safe areas
     function updateSafeAreas() {
@@ -380,10 +419,4 @@ document.addEventListener('DOMContentLoaded', function() {
             isScrolling = false;
         }, { passive: true });
     }
-
-    // Auto-expand textarea
-    messageInput.addEventListener('input', function() {
-        this.style.height = 'auto';
-        this.style.height = (this.scrollHeight) + 'px';
-    });
 }); 
