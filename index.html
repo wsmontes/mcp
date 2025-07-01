@@ -125,47 +125,49 @@
         <!-- Main Chat Area -->
         <div class="main-chat-area flex flex-col">
             <!-- Chat Header -->
-            <div class="chat-header bg-chat-light border-b border-chat-border flex items-center justify-between">
-                <div class="flex items-center space-x-3">
-                    <button id="toggle-sidebar" class="p-2 rounded-lg hover:bg-chat-hover transition-colors lg:hidden">
-                        <i class="fas fa-bars"></i>
-                    </button>
-                    <div>
-                        <h2 id="chat-title" class="font-semibold text-base">New Chat</h2>
-                        <div class="text-sm text-chat-secondary">
-                            <span id="agent-status" class="flex items-center">
-                                <span class="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                                LM Studio Ready
-                            </span>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="flex items-center space-x-1 md:space-x-2">
-                    <!-- Model Selector - Hidden on mobile -->
-                    <div class="model-selector-container hidden md:flex items-center space-x-2">
-                        <select id="model-selector" class="bg-chat-input border border-chat-border rounded-lg px-2 py-1 text-sm text-chat-text focus:outline-none focus:ring-2 focus:ring-chat-primary">
-                            <option value="">Loading...</option>
-                        </select>
-                        <div class="model-info text-xs text-chat-secondary">
-                            <div id="current-model">Model: Loading...</div>
-                            <div id="model-temp">Temp: 0.7</div>
+            <div class="chat-header">
+                <div class="flex items-center justify-between px-3">
+                    <div class="flex items-center space-x-3">
+                        <button id="toggle-sidebar" class="p-2 rounded-lg hover:bg-chat-hover transition-colors lg:hidden">
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div>
+                            <h2 id="chat-title" class="font-semibold text-base">New Chat</h2>
+                            <div class="text-sm text-chat-secondary">
+                                <span id="agent-status" class="flex items-center">
+                                    <span class="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                                    LM Studio Ready
+                                </span>
+                            </div>
                         </div>
                     </div>
                     
-                    <div class="flex items-center space-x-2">
-                        <button id="voice-btn" class="p-2 rounded-lg hover:bg-chat-hover transition-colors" title="Voice input">
-                            <i class="fas fa-microphone"></i>
-                        </button>
-                        <button id="conversation-btn" class="hidden sm:block p-2 rounded-lg hover:bg-chat-hover transition-colors" title="Start conversation mode">
-                            <i class="fas fa-comments"></i>
-                        </button>
-                        <button id="file-upload-btn" class="p-2 rounded-lg hover:bg-chat-hover transition-colors" title="Upload files">
-                            <i class="fas fa-paperclip"></i>
-                        </button>
-                        <button id="more-options" class="p-2 rounded-lg hover:bg-chat-hover transition-colors" title="More options">
-                            <i class="fas fa-ellipsis-v"></i>
-                        </button>
+                    <div class="flex items-center space-x-1 md:space-x-2">
+                        <!-- Model Selector - Hidden on mobile -->
+                        <div class="model-selector-container hidden md:flex items-center space-x-2">
+                            <select id="model-selector" class="bg-chat-input border border-chat-border rounded-lg px-2 py-1 text-sm text-chat-text focus:outline-none focus:ring-2 focus:ring-chat-primary">
+                                <option value="">Loading...</option>
+                            </select>
+                            <div class="model-info text-xs text-chat-secondary">
+                                <div id="current-model">Model: Loading...</div>
+                                <div id="model-temp">Temp: 0.7</div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-center space-x-2">
+                            <button id="voice-btn" class="p-2 rounded-lg hover:bg-chat-hover transition-colors" title="Voice input">
+                                <i class="fas fa-microphone"></i>
+                            </button>
+                            <button id="conversation-btn" class="hidden sm:block p-2 rounded-lg hover:bg-chat-hover transition-colors" title="Start conversation mode">
+                                <i class="fas fa-comments"></i>
+                            </button>
+                            <button id="file-upload-btn" class="p-2 rounded-lg hover:bg-chat-hover transition-colors" title="Upload files">
+                                <i class="fas fa-paperclip"></i>
+                            </button>
+                            <button id="more-options" class="p-2 rounded-lg hover:bg-chat-hover transition-colors" title="More options">
+                                <i class="fas fa-ellipsis-v"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

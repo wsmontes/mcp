@@ -208,18 +208,44 @@ document.addEventListener('DOMContentLoaded', function() {
         if (isIOS) {
             const vh = window.innerHeight * 0.01;
             document.documentElement.style.setProperty('--vh', `${vh}px`);
-            document.getElementById('app').style.height = `calc(var(--vh, 1vh) * 100)`;
+            
+            // Ensure the app container uses the correct height
+            const appContainer = document.getElementById('app');
+            appContainer.style.height = `calc(var(--vh, 1vh) * 100)`;
+            
+            // Update header positioning
+            const header = document.querySelector('.chat-header');
+            if (header) {
+                const safeAreaTop = getComputedStyle(document.documentElement)
+                    .getPropertyValue('--safe-area-inset-top')
+                    .replace('px', '');
+                
+                // Ensure header is visible and properly positioned
+                header.style.top = `${safeAreaTop}px`;
+            }
         }
     }
 
-    // Call on initial load and resize
+    // Call on initial load
     setIOSViewportHeight();
-    window.addEventListener('resize', setIOSViewportHeight);
+
+    // Handle orientation changes and resize events
+    let resizeTimeout;
+    window.addEventListener('resize', function() {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(setIOSViewportHeight, 100);
+    });
+
+    window.addEventListener('orientationchange', function() {
+        // Wait for the orientation change to complete
+        setTimeout(setIOSViewportHeight, 100);
+    });
 
     // Handle iOS keyboard issues
     const messageInput = document.getElementById('message-input');
     const chatContainer = document.getElementById('chat-container');
     const inputArea = document.querySelector('.input-area');
+    const header = document.querySelector('.chat-header');
 
     if (isIOS) {
         // Prevent elastic scrolling
@@ -228,21 +254,37 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Handle keyboard appearance
         messageInput.addEventListener('focus', function() {
-            // Add a slight delay to ensure the keyboard is fully shown
             setTimeout(() => {
+                // Ensure header stays visible
+                header.style.position = 'sticky';
+                header.style.top = '0';
+                
                 // Scroll to bottom
                 chatContainer.scrollTop = chatContainer.scrollHeight;
                 
-                // Add padding to prevent content from being hidden behind keyboard
+                // Adjust for keyboard
                 document.body.classList.add('keyboard-open');
                 inputArea.style.position = 'relative';
             }, 100);
         });
 
         messageInput.addEventListener('blur', function() {
-            // Remove padding when keyboard is hidden
             document.body.classList.remove('keyboard-open');
             inputArea.style.position = 'sticky';
+            
+            // Reset header position
+            setIOSViewportHeight();
+        });
+
+        // Ensure header visibility on scroll
+        chatContainer.addEventListener('scroll', function() {
+            requestAnimationFrame(function() {
+                if (chatContainer.scrollTop > 0) {
+                    header.style.borderBottom = '1px solid var(--chat-border)';
+                } else {
+                    header.style.borderBottom = 'none';
+                }
+            });
         });
     }
 
